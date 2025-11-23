@@ -2,9 +2,11 @@ services:
   ros-simulation:
     build: .
     container_name: ros2_sim
-    network_mode: host
+    ports:
+      - "8765:8765"  # Foxglove WebSocket port
     environment:
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
       - ROS_DOMAIN_ID=0
+      - ROS_LOCALHOST_ONLY=1
     command: >
       bash /ros2_ws/run.sh
