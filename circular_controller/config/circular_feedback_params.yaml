@@ -1,0 +1,70 @@
+# Configurazione per il controller circolare con feedback
+
+circular_controller_feedback:
+  ros__parameters:
+    # Raggio del cerchio target [metri]
+    circle_radius: 13.5
+    
+    # Velocità target [m/s] - MOLTO RIDOTTA per movimento lento
+    target_velocity: 1.0
+    
+    # Torque per ruota [Nm] - RIDOTTO per velocità bassa
+    torque_per_wheel: 5.0
+    
+    # Tempo di warm-up iniziale [secondi]
+    warmup_time: 3.0
+    
+    # Tempo di applicazione torque [secondi]
+    # Dopo questo tempo, il veicolo va per INERZIA (torque = 0)
+    # Regola questo per controllare la velocità finale
+    acceleration_time: 4.0
+    
+    # Frequenza pubblicazione [Hz]
+    publish_rate: 50.0
+    
+    # === Parametri veicolo ===
+    wheelbase_front: 0.78
+    wheelbase_rear: 0.72
+    inner_steering_ratio: 0.255625
+    outer_steering_ratio: 0.20375
+    
+    # === Parametri feedback PID ===
+    
+    # Guadagno Proporzionale (Kp)
+    # Reagisce all'errore ATTUALE
+    # Più alto = correzione più veloce ma può oscillare
+    # Valori tipici: 1.0 - 5.0
+    kp: 5.0
+    
+    # Guadagno Integrale (Ki)
+    # Elimina l'errore STAZIONARIO accumulato nel tempo
+    # Troppo alto = sistema instabile, troppo basso = errore residuo
+    # Valori tipici: 0.1 - 1.0
+    ki: 0.5
+    
+    # Guadagno Derivativo (Kd)
+    # Smorza le OSCILLAZIONI basandosi sulla velocità di cambiamento dell'errore
+    # Più alto = sistema più smorzato ma può essere sensibile al rumore
+    # Valori tipici: 0.2 - 2.0
+    kd: 5.0
+    
+    # Limite anti-windup per integrale
+    # Previene che l'integrale cresca troppo e causi overshoot
+    # Valori tipici: 0.1 - 0.5
+    integral_max: 0.3
+    
+    # Centro del cerchio [metri]
+    # Devi regolare questi valori in base al punto di partenza
+    # Se parti da (0,0) e vuoi un cerchio di raggio 13.5m a destra:
+    center_x: 0.0
+    center_y: -13.5
+    
+    # === Controllo velocità adattivo ===
+    
+    # Velocità minima [m/s]
+    # Se la velocità scende sotto questa soglia → ACCENDE il torque
+    min_velocity: 4.0
+    
+    # Velocità massima [m/s]
+    # Se la velocità supera questa soglia → SPEGNE il torque
+    max_velocity: 6.0

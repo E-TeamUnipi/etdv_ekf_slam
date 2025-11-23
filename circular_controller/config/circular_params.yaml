@@ -1,0 +1,47 @@
+# Configurazione per il controller circolare
+# 
+# Questo file contiene i parametri per configurare il percorso circolare
+# della macchina nel simulatore pacsim
+
+circular_controller:
+  ros__parameters:
+    # Raggio del cerchio da percorrere [metri]
+    circle_radius: 13.5
+    
+    # Velocità target del veicolo [m/s] - RIDOTTA per maggiore controllo
+    target_velocity: 3.0
+    
+    # Torque applicato a ciascuna ruota [Nm] - RIDOTTO
+    torque_per_wheel: 12.0
+    
+    # Tempo di ramp-up iniziale [secondi]
+    warmup_time: 3.0
+    
+    # Tempo di applicazione torque [secondi]
+    # Dopo questo tempo, il veicolo va per INERZIA (torque = 0)
+    # Aumenta per velocità più alte, riduci per andare più piano
+    acceleration_time: 4.0
+    
+    # Frequenza di pubblicazione dei comandi [Hz]
+    publish_rate: 50.0
+    
+    # === Parametri del veicolo ===
+    # (Questi dovrebbero corrispondere ai valori nel modello del veicolo)
+    
+    # Distanza CoG - asse anteriore [m]
+    wheelbase_front: 0.78
+    
+    # Distanza CoG - asse posteriore [m]
+    wheelbase_rear: 0.72
+    
+    # Rapporto di sterzo interno (ruota interna alla curva)
+    inner_steering_ratio: 0.255625
+    
+    # Rapporto di sterzo esterno (ruota esterna alla curva)
+    outer_steering_ratio: 0.20375
+    
+    # Fattore di compensazione sterzo (empirico)
+    # < 1.0: riduce angolo → raggio più largo (utile se stringe troppo)
+    # > 1.0: aumenta angolo → raggio più stretto
+    # Parti da 0.92 e aggiusta in base al comportamento osservato
+    steering_compensation_factor: 0.92
