@@ -1,0 +1,4 @@
+[submodule "pacsim"]
+	path = pacsim
+	url = https://github.com/E-TeamUnipi/pacsim
+	branch = develop

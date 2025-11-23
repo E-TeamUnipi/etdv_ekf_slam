@@ -1,0 +1,10 @@
+services:
+  ros-simulation:
+    build: .
+    container_name: ros2_sim
+    network_mode: host
+    environment:
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - ROS_DOMAIN_ID=0
+    command: >
+      bash /ros2_ws/run.sh
