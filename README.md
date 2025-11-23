@@ -9,7 +9,7 @@ This repo works as a sort of wrapper for the pacsim simulator.
 - Initialize submodules (pacsim): `git submodule init; git submodule update`
 - Enter the directory: `cd pacsim_ws`
 ### Build
-- Run `docker compose build` 
+- Run `docker compose build` (can take more than 10 minutes) 
 ### Execute
 - Run `docker compose up`
 
