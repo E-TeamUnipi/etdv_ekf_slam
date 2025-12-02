@@ -1,5 +1,13 @@
 #!/bin/bash
 source /opt/ros/humble/setup.bash
+
+# Build workspace if install directory doesn't exist
+if [ ! -d "/ros2_ws/install" ]; then
+    echo "Building ROS2 workspace..."
+    cd /ros2_ws
+    colcon build
+fi
+
 source /ros2_ws/install/setup.bash
 
 ros2 launch foxglove_bridge foxglove_bridge_launch.xml &

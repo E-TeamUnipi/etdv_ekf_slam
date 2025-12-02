@@ -8,5 +8,7 @@ services:
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
       - ROS_DOMAIN_ID=0
       - ROS_LOCALHOST_ONLY=1
+    volumes:
+      - .:/ros2_ws
     command: >
       bash /ros2_ws/run.sh
