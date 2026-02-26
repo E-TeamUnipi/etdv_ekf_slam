@@ -21,6 +21,7 @@ WORKDIR /ros2_ws/src
 # Copy only the package directories (not Dockerfile, docker-compose, etc)
 COPY pacsim/ ./pacsim/
 COPY circular_controller/ ./circular_controller/
+COPY ekf_slam/ ./ekf_slam/
 # Se hai altri pacchetti, aggiungili qui:
 # COPY altro_pacchetto/ ./altro_pacchetto/
 
