@@ -18,9 +18,9 @@ public:
     ekf_ = std::make_shared<EKF_SLAM>();
 
     // Parametri EKF
-    this->declare_parameter("process_noise_v", 0.5);
-    this->declare_parameter("process_noise_omega", 0.5);
-    this->declare_parameter("meas_noise_range", 0.01);
+    this->declare_parameter("process_noise_v", 0.1);
+    this->declare_parameter("process_noise_omega", 0.05);
+    this->declare_parameter("meas_noise_range", 0.05);
     this->declare_parameter("meas_noise_bearing", 0.01);
     this->declare_parameter("association_threshold", 9.0); // Mahalanobis per loop closure
 
@@ -41,8 +41,8 @@ public:
         "/pacsim/perception/livox_front/visualization", 10, std::bind(&EKFNode::conesCallback, this, _1)); 
 
     // --- PUBLISHERS (Identici al Graph SLAM) ---
-    pub_pose_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/cones_estimate", 10);
-    pub_markers_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/pose_estimate", 10);
+    pub_pose_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/pose_estimate", 10);
+    pub_markers_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/cones_estimate", 10);
 
     // Timer a 10Hz come nel Graph SLAM
     timer_viz_ = this->create_wall_timer(
@@ -78,8 +78,7 @@ private:
     }
   }
 
-  // --- CALLBACK CONI (Ora legge MarkerArray come Pacsim) ---
-  void conesCallback(const visualization_msgs::msg::MarkerArray::SharedPtr msg) {
+void conesCallback(const visualization_msgs::msg::MarkerArray::SharedPtr msg) {
     std::lock_guard<std::mutex> lock(ekf_mutex_);
     
     if (first_odom_ || msg->markers.empty()) return; 
@@ -93,13 +92,13 @@ private:
     }
 
     int m = msg->markers.size();
+    
+    // CREIAMO SOLO 2 VETTORI (Niente più ids!)
     Eigen::VectorXd ranges(m);
     Eigen::VectorXd bearings(m);
-    Eigen::VectorXi ids(m);
 
     int valid_count = 0;
     for (int i = 0; i < m; i++) {
-        // Estrae X e Y dalla posizione del Marker
         double x = msg->markers[i].pose.position.x;
         double y = msg->markers[i].pose.position.y;
         
@@ -111,16 +110,15 @@ private:
 
         ranges(valid_count)   = r;
         bearings(valid_count) = b;
-        ids(valid_count) = -1; // Data Association bendata dell'EKF
-        
         valid_count++;
     }
     
     if (valid_count > 0) {
         ranges.conservativeResize(valid_count);
         bearings.conservativeResize(valid_count);
-        ids.conservativeResize(valid_count);
-        ekf_->correct(ranges, bearings, ids);
+        
+        // CHIAMATA CORRETTA CON 2 ARGOMENTI
+        ekf_->correct(ranges, bearings);
     }
   }
 
