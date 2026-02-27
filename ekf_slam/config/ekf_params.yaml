@@ -7,12 +7,12 @@
     # AUMENTA questi valori. Di al robot che le ruote scivolano!
     # Questo aumenta la Matrice P (Incertezza posizione)
     process_noise_v: 0.1      # Prova 2.5 o 3.0 (era 0.8) -> 0.5 per la simulazione
-    process_noise_omega: 0.1   # Prova 2.5 o 3.0 (era 0.5) -> come sopra
+    process_noise_omega: 0.05   # Prova 2.5 o 3.0 (era 0.5) -> come sopra
     
     # RILASSA leggermente questi valori
     # Se sono troppo piccoli, rischi di scartare dati validi
-    meas_noise_range: 0.1     # 10 cm è più realistico di 5 cm
-    meas_noise_bearing: 0.1    # Va bene
+    meas_noise_range: 0.05     # 10 cm è più realistico di 5 cm
+    meas_noise_bearing: 0.01    # Va bene
     
     # IMPORTANTE: Data Association
-    association_threshold: 5.0 # 50.0 è ENORME! -> 5 per la simulazion
+    association_threshold: 9.0 # 50.0 è ENORME! -> 5 per la simulazion

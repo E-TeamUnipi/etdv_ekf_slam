@@ -181,7 +181,7 @@ int EKF_SLAM::findAssociation(double range, double bearing, const std::vector<in
         double pred_y = -dx * std::sin(theta) + dy * std::cos(theta);
         double eucl_dist = std::hypot(meas_x - pred_x, meas_y - pred_y);
 
-        if (mahalanobis_dist < min_dist && mahalanobis_dist < mahalanobis_threshold_ && eucl_dist < 4.0) {
+        if (mahalanobis_dist < min_dist && mahalanobis_dist < mahalanobis_threshold_ && eucl_dist < 6.0) {  //cambiata da 4.0 per associazione migliore
             min_dist = mahalanobis_dist;
             best_id = id;
         }
@@ -246,10 +246,13 @@ void EKF_SLAM::correct(const Eigen::VectorXd& ranges, const Eigen::VectorXd& bea
         x_ = x_ + K * y;
         x_(2) = normalizeAngle(x_(2));
         
-        // Forma di Joseph sicura (Previene il crash della covarianza)
-        Eigen::MatrixXd I = Eigen::MatrixXd::Identity(N, N);
-        Eigen::MatrixXd I_KH = I - K * H;
-        P_ = I_KH * P_ * I_KH.transpose() + K * R_ * K.transpose(); 
+        // --- FIX LAG: Ottimizzazione Computazionale (Da O(N^3) a O(N^2)) ---
+        // Isoliamo (H * P_) per forzare Eigen a fare moltiplicazioni più piccole.
+        // Questo elimina completamente gli "scatti" quando la mappa diventa grande!
+        Eigen::MatrixXd HP = H * P_;
+        P_ = P_ - K * HP; 
+        
+        // Forza la simmetria per evitare divergenze numeriche nel lungo termine
         P_ = (P_ + P_.transpose()) * 0.5;
     }
 }

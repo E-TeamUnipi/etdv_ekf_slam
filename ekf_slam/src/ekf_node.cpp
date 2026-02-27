@@ -106,7 +106,7 @@ void conesCallback(const visualization_msgs::msg::MarkerArray::SharedPtr msg) {
         double b = std::atan2(y, x);
 
         if (std::isnan(r) || std::isnan(b)) continue;
-        if (r > 20.0 || r < 0.1) continue; 
+        if (r > 15.0 || r < 0.1) continue; //da 20 a 15 per evitare di aggiungere coni troppo lontani
 
         ranges(valid_count)   = r;
         bearings(valid_count) = b;
