@@ -24,7 +24,7 @@ EKF_SLAM::EKF_SLAM() {
     R_ = Eigen::Matrix2d::Identity() * 0.1;
     n_landmarks_ = 0;
     
-    mahalanobis_threshold_ = 9.0; // Valore statistico per il loop closure
+    mahalanobis_threshold_ = 9.0; 
 }
 
 double EKF_SLAM::normalizeAngle(double a) {
@@ -70,10 +70,9 @@ void EKF_SLAM::predict(double v, double omega, double dt) {
 
     Eigen::MatrixXd Qk = W * M * W.transpose();
     
-    // Iniezione di incertezza costante per non far "addormentare" il filtro
-    Qk(0,0) += 1e-3; 
-    Qk(1,1) += 1e-3; 
-    Qk(2,2) += 1e-4; 
+    Qk(0,0) += 1e-2; 
+    Qk(1,1) += 1e-2; 
+    Qk(2,2) += 1e-2; //aumentati di 100 volte per rilassare la sicurezza sull'odometria 
 
     P_ = F * P_ * F.transpose() + Qk;
     P_ = (P_ + P_.transpose()) * 0.5;
@@ -170,10 +169,8 @@ int EKF_SLAM::findAssociation(double range, double bearing, const std::vector<in
 
         Eigen::Matrix2d S = H * P_ * H.transpose() + R_;
         
-        // Mahalanobis Distance
         double mahalanobis_dist = innov.transpose() * S.inverse() * innov;
         
-        // Check fisico (Euclideo) di sicurezza massima
         double meas_x = range * std::cos(bearing);
         double meas_y = range * std::sin(bearing);
         double theta = x_(2);
@@ -181,7 +178,8 @@ int EKF_SLAM::findAssociation(double range, double bearing, const std::vector<in
         double pred_y = -dx * std::sin(theta) + dy * std::cos(theta);
         double eucl_dist = std::hypot(meas_x - pred_x, meas_y - pred_y);
 
-        if (mahalanobis_dist < min_dist && mahalanobis_dist < mahalanobis_threshold_ && eucl_dist < 6.0) {  //cambiata da 4.0 per associazione migliore
+        // FIX 3: Ripristinato eucl_dist a 2.5m. A 6m associava il cono successivo in pista!
+        if (mahalanobis_dist < min_dist && mahalanobis_dist < mahalanobis_threshold_ && eucl_dist < 2.5) {  
             min_dist = mahalanobis_dist;
             best_id = id;
         }
@@ -195,11 +193,13 @@ void EKF_SLAM::correct(const Eigen::VectorXd& ranges, const Eigen::VectorXd& bea
     std::vector<Measurement> meas_list;
     for (int i = 0; i < ranges.size(); ++i) {
         if (std::isnan(ranges(i)) || std::isnan(bearings(i))) continue;
-        if (ranges(i) < 0.1 || ranges(i) > 30.0) continue;
+        
+        // --- FIX 1: MIOPIA TATTICA ---
+        // I coni oltre i 12 metri hanno un errore trasversale letale a causa del drift di theta.
+        if (ranges(i) < 0.1 || ranges(i) > 12.0) continue; 
         meas_list.push_back({ranges(i), bearings(i)});
     }
 
-    // Ordinamento magico: Prima i coni vicini, poi quelli lontani (Previene il drift in curva)
     std::sort(meas_list.begin(), meas_list.end(), [](const Measurement& a, const Measurement& b) {
         return a.range < b.range;
     });
@@ -210,8 +210,30 @@ void EKF_SLAM::correct(const Eigen::VectorXd& ranges, const Eigen::VectorXd& bea
         int internal_id = findAssociation(m.range, m.bearing, updated_landmarks);
 
         if (internal_id == -1) {
-            internal_id = addLandmark(m.range, m.bearing);
-            updated_landmarks.push_back(internal_id);
+            // --- FIX 2: SCUDO ANTI-DUPLICAZIONE (Il salvavita) ---
+            // Se l'associazione è fallita, calcoliamo dove finirebbe questo "nuovo" cono.
+            bool is_ghost = false;
+            double meas_x = m.range * std::cos(m.bearing);
+            double meas_y = m.range * std::sin(m.bearing);
+            double theta = x_(2);
+            double global_x = x_(0) + meas_x * std::cos(theta) - meas_y * std::sin(theta);
+            double global_y = x_(1) + meas_x * std::sin(theta) + meas_y * std::cos(theta);
+
+            // Se esiste GIÀ un cono a meno di 1.5 metri da qui, è palesemente un errore di associazione.
+            // NON lo aggiungiamo. Ignoriamo la misurazione.
+            for(int j=0; j<n_landmarks_; ++j) {
+                double lx = x_(3 + j*2);
+                double ly = x_(3 + j*2 + 1);
+                if (std::hypot(global_x - lx, global_y - ly) < 1.5) {
+                    is_ghost = true; 
+                    break;
+                }
+            }
+
+            if(!is_ghost) {
+                internal_id = addLandmark(m.range, m.bearing);
+                updated_landmarks.push_back(internal_id);
+            }
             continue; 
         }
 
@@ -246,13 +268,9 @@ void EKF_SLAM::correct(const Eigen::VectorXd& ranges, const Eigen::VectorXd& bea
         x_ = x_ + K * y;
         x_(2) = normalizeAngle(x_(2));
         
-        // --- FIX LAG: Ottimizzazione Computazionale (Da O(N^3) a O(N^2)) ---
-        // Isoliamo (H * P_) per forzare Eigen a fare moltiplicazioni più piccole.
-        // Questo elimina completamente gli "scatti" quando la mappa diventa grande!
         Eigen::MatrixXd HP = H * P_;
         P_ = P_ - K * HP; 
         
-        // Forza la simmetria per evitare divergenze numeriche nel lungo termine
         P_ = (P_ + P_.transpose()) * 0.5;
     }
 }

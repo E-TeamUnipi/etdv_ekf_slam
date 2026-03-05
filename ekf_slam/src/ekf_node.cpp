@@ -20,8 +20,8 @@ public:
     // Parametri EKF
     this->declare_parameter("process_noise_v", 0.1);
     this->declare_parameter("process_noise_omega", 0.05);
-    this->declare_parameter("meas_noise_range", 0.05);
-    this->declare_parameter("meas_noise_bearing", 0.01);
+    this->declare_parameter("meas_noise_range", 0.15);
+    this->declare_parameter("meas_noise_bearing", 0.05);
     this->declare_parameter("association_threshold", 9.0); // Mahalanobis per loop closure
 
     ekf_->setProcessNoise(this->get_parameter("process_noise_v").as_double(),
