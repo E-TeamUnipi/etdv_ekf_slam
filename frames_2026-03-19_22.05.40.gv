@@ -1,0 +1,20 @@
+digraph G {
+"FL_inside" -> "FL_outside"[label=" Broadcaster: default_authority\nAverage rate: 1000.543\nBuffer length: 1.84\nMost recent transform: 28.83\nOldest transform: 26.99\n"];
+"Modell" -> "FL_inside"[label=" Broadcaster: default_authority\nAverage rate: 1000.543\nBuffer length: 1.84\nMost recent transform: 28.83\nOldest transform: 26.99\n"];
+"car" -> "Modell"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"FR_inside" -> "FR_outside"[label=" Broadcaster: default_authority\nAverage rate: 1000.543\nBuffer length: 1.84\nMost recent transform: 28.83\nOldest transform: 26.99\n"];
+"Modell" -> "FR_inside"[label=" Broadcaster: default_authority\nAverage rate: 1000.543\nBuffer length: 1.84\nMost recent transform: 28.83\nOldest transform: 26.99\n"];
+"RL_inside" -> "RL_outside"[label=" Broadcaster: default_authority\nAverage rate: 1000.543\nBuffer length: 1.84\nMost recent transform: 28.83\nOldest transform: 26.99\n"];
+"Modell" -> "RL_inside"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"RR_inside" -> "RR_outside"[label=" Broadcaster: default_authority\nAverage rate: 1000.543\nBuffer length: 1.84\nMost recent transform: 28.83\nOldest transform: 26.99\n"];
+"Modell" -> "RR_inside"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"Modell" -> "steering_wheel"[label=" Broadcaster: default_authority\nAverage rate: 1000.543\nBuffer length: 1.84\nMost recent transform: 28.83\nOldest transform: 26.99\n"];
+"map" -> "car"[label=" Broadcaster: default_authority\nAverage rate: 1000.543\nBuffer length: 1.84\nMost recent transform: 28.831\nOldest transform: 26.991\n"];
+"cog" -> "livox_front"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"cog" -> "livox_left2"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"cog" -> "livox_right2"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+edge [style=invis];
+ subgraph cluster_legend { style=bold; color=black; label ="view_frames Result";
+"Recorded at time: 1773957940.6628869"[ shape=plaintext ] ;
+}->"cog";
+}
