@@ -14,7 +14,7 @@ using std::placeholders::_1;
 
 class EKFNode : public rclcpp::Node {
 public:
-  EKFNode() : Node("ekf_node") {
+  EKFNode(const rclcpp::NodeOptions & options) : Node("ekf_node", options) {
     ekf_ = std::make_shared<EKF_SLAM>();
 
     // Parametri EKF
@@ -199,7 +199,13 @@ void conesCallback(const visualization_msgs::msg::MarkerArray::SharedPtr msg) {
 
 int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<EKFNode>());
+
+  // Forza use_sim_time=true prima che il nodo venga costruito,
+  // così get_clock() usa già il sim time fin dal primo messaggio.
+  auto options = rclcpp::NodeOptions();
+  options.parameter_overrides({{"use_sim_time", true}});
+
+  rclcpp::spin(std::make_shared<EKFNode>(options));
   rclcpp::shutdown();
   return 0;
 }
