@@ -20,7 +20,7 @@ sleep 2
 ros2 launch circular_controller circular_controller_feedback.launch.py &
 sleep 2
 
-ros2 run ekf_slam ekf_node &
+ros2 launch ekf_slam ekf_slam.launch.py &
 sleep 2
 
 ros2 launch pacsim example.launch.py

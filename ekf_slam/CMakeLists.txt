@@ -49,6 +49,9 @@ install(TARGETS ekf_node ekf_lib
 install(DIRECTORY include/
   DESTINATION include)
 
+install(DIRECTORY launch config
+  DESTINATION share/${PROJECT_NAME})
+
 # -----------------------------
 # Export package
 # -----------------------------
