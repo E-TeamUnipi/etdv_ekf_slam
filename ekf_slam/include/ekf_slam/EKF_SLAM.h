@@ -7,7 +7,7 @@ class EKF_SLAM {
 public:
     EKF_SLAM();
 
-    void predict(double v, double omega, double dt);
+    void predict(double v, double vy, double omega, double dt);
     // Nota: rimosso l'array di IDs, l'EKF deve arrangiarsi con la sua logica!
     void correct(const Eigen::VectorXd& ranges, const Eigen::VectorXd& bearings);
 

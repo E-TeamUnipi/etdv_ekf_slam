@@ -67,6 +67,7 @@ public:
     last_odom_time_   = this->get_clock()->now();
     first_odom_       = true;
     last_v_           = 0.0;
+    last_vy_          = 0.0;
     last_omega_       = 0.0;
   }
 
@@ -92,11 +93,12 @@ private:
     double dt = (now - last_update_time_).seconds();
 
     last_v_         = msg->twist.twist.linear.x;
+    last_vy_        = msg->twist.twist.linear.y;
     last_omega_     = msg->twist.twist.angular.z;
     last_odom_time_ = now;
 
     if (dt > 0.0) {
-      ekf_->predict(last_v_, last_omega_, dt);
+      ekf_->predict(last_v_, last_vy_, last_omega_, dt);
       last_update_time_ = now;
     }
     // FIX 2: dt <= 0 (messaggi fuori ordine o duplicati) viene ignorato
@@ -133,7 +135,7 @@ private:
     // upstream, non vanno integrati ciecamente.
     double dt_cones = (msg_time - last_update_time_).seconds();
     if (dt_cones > 0.0 && dt_cones < 0.5) {
-      ekf_->predict(last_v_, last_omega_, dt_cones);
+      ekf_->predict(last_v_, last_vy_, last_omega_, dt_cones);
       last_update_time_ = msg_time;
     } else if (dt_cones >= 0.5) {
       RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
@@ -269,6 +271,7 @@ private:
   rclcpp::Time last_odom_time_;
   bool         first_odom_;
   double       last_v_;
+  double       last_vy_;
   double       last_omega_;
 };
 

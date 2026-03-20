@@ -108,20 +108,30 @@ double EKF_SLAM::normalizeAngle(double a) {
     return a;
 }
 
-void EKF_SLAM::predict(double v, double omega, double dt) {
-    if (std::isnan(v) || std::isnan(omega) || std::isinf(v) || std::isinf(omega)) return;
+void EKF_SLAM::predict(double v, double vy, double omega, double dt) {
+    if (std::isnan(v) || std::isnan(vy) || std::isnan(omega) ||
+        std::isinf(v) || std::isinf(vy) || std::isinf(omega)) return;
     
     double theta = x_(2);
     double s = std::sin(theta);
     double c = std::cos(theta);
 
+    // Modello cinematico con velocita' laterale vy (nel frame del robot).
+    // Le coordinate globali si aggiornano ruotando (v, vy) nel frame map:
+    //   dx_map = v*cos(theta) - vy*sin(theta)
+    //   dy_map = v*sin(theta) + vy*cos(theta)
+    // Il termine con omega e' integrato esattamente per v (curva costante).
+    // vy e' trattato con integrazione lineare (tipicamente piccolo).
     if (std::abs(omega) > 1e-4) {
-        x_(0) += (v / omega) * (std::sin(theta + omega * dt) - s);
-        x_(1) += (v / omega) * (-std::cos(theta + omega * dt) + c);
+        x_(0) += (v / omega) * (std::sin(theta + omega * dt) - s)
+               + vy * dt * (-s);  // contributo laterale approssimato
+        x_(1) += (v / omega) * (-std::cos(theta + omega * dt) + c)
+               + vy * dt * c;
         x_(2) += omega * dt;
     } else {
-        x_(0) += v * std::cos(theta + omega * dt * 0.5) * dt;
-        x_(1) += v * std::sin(theta + omega * dt * 0.5) * dt;
+        double theta_mid = theta + omega * dt * 0.5;
+        x_(0) += (v * std::cos(theta_mid) - vy * std::sin(theta_mid)) * dt;
+        x_(1) += (v * std::sin(theta_mid) + vy * std::cos(theta_mid)) * dt;
         x_(2) += omega * dt;
     }
     x_(2) = normalizeAngle(x_(2));
@@ -134,13 +144,16 @@ void EKF_SLAM::predict(double v, double omega, double dt) {
     //              +  (d^T * P.col(2)) * d * d^T  (termine scalare)
     // dove d = [0, 0, 0, ..., F(0,2), F(1,2), 0, ...]^T (solo righe 0 e 1 non-zero)
 
+    // Jacobiano F: derivate parziali di x rispetto a theta.
+    // Con vy: d(x)/d(theta) += -vy*cos(theta)*dt, d(y)/d(theta) += -vy*sin(theta)*dt
     double f02, f12;
     if (std::abs(omega) > 1e-4) {
-        f02 = (v / omega) * (std::cos(theta + omega * dt) - c);
-        f12 = (v / omega) * (std::sin(theta + omega * dt) - s);
+        f02 = (v / omega) * (std::cos(theta + omega * dt) - c) - vy * s * dt;
+        f12 = (v / omega) * (std::sin(theta + omega * dt) - s) + vy * c * dt;
     } else {
-        f02 = -v * s * dt;
-        f12 =  v * c * dt;
+        double theta_mid = theta + omega * dt * 0.5;
+        f02 = -v * std::sin(theta_mid) * dt - vy * std::cos(theta_mid) * dt;
+        f12 =  v * std::cos(theta_mid) * dt - vy * std::sin(theta_mid) * dt;
     }
 
     // P ← F * P * F^T  usando rank-2 update (O(N²) ma con costante molto minore)
