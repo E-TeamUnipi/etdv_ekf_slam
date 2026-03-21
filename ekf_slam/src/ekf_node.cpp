@@ -14,7 +14,7 @@ using std::placeholders::_1;
 
 // Soglia di staleness odometria: se l'ultimo messaggio odom è più vecchio di
 // questo valore, predict usa v=0 omega=0 per non propagare velocità fantasma.
-static constexpr double ODOM_STALE_THRESHOLD_S = 0.5;
+static constexpr double ODOM_STALE_THRESHOLD_S = 1.5; //alzato da 0.5 per evitare gli stop di pacsim alla loop closure
 
 class EKFNode : public rclcpp::Node {
 public:
@@ -134,10 +134,10 @@ private:
     // dei coni. Soglia 500ms: gap maggiori indicano odom stale o problema
     // upstream, non vanno integrati ciecamente.
     double dt_cones = (msg_time - last_update_time_).seconds();
-    if (dt_cones > 0.0 && dt_cones < 0.5) {
+    if (dt_cones > 0.0 && dt_cones < 1.5) { //alzato il limite negativo per sim time pacsim alla loop closure
       ekf_->predict(last_v_, last_vy_, last_omega_, dt_cones);
       last_update_time_ = msg_time;
-    } else if (dt_cones >= 0.5) {
+    } else if (dt_cones >= 1.5) { //soglia del warning aggiornata in accordo con la soglia sopra
       RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
           "Gap temporale coni troppo grande (%.3f s), predict-to-measurement saltato.", dt_cones);
     }
