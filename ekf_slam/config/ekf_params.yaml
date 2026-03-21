@@ -15,4 +15,4 @@
     meas_noise_bearing: 0.005    # Va bene
     
     # IMPORTANTE: Data Association
-    association_threshold: 18.0 # 50.0 è ENORME! -> 5 per la simulazion
+    association_threshold: 10.0 # 50.0 è ENORME! -> 5 per la simulazion
