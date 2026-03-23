@@ -12,7 +12,7 @@
     # RILASSA leggermente questi valori
     # Se sono troppo piccoli, rischi di scartare dati validi
     meas_noise_range: 0.062     # 10 cm è più realistico di 5 cm
-    meas_noise_bearing: 0.01    # Va bene
+    meas_noise_bearing: 0.025    # Va bene
     
     # IMPORTANTE: Data Association
     association_threshold: 15.0 # 50.0 è ENORME! -> 5 per la simulazion
