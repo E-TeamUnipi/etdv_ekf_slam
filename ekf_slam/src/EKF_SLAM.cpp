@@ -332,7 +332,7 @@ void EKF_SLAM::correct(const Eigen::VectorXd& ranges, const Eigen::VectorXd& bea
         
         // --- FIX 1: MIOPIA TATTICA ---
         // I coni oltre i 12 metri hanno un errore trasversale letale a causa del drift di theta.
-        if (ranges(i) < 0.1 || ranges(i) > 12.0) continue; 
+        if (ranges(i) < 0.1 || ranges(i) > 20.0) continue; 
         meas_list.push_back({ranges(i), bearings(i)});
     }
 
