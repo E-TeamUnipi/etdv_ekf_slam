@@ -9,6 +9,7 @@ find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
+find_package(tf2_ros REQUIRED)
 
 # -----------------------------
 # Include directories
@@ -21,11 +22,12 @@ include_directories(
 # -----------------------------
 # Library
 # -----------------------------
-add_library(ekf_lib src/EKF_SLAM.cpp)
+add_library(ekf_lib src/EKF_Pose.cpp)
 ament_target_dependencies(ekf_lib
   rclcpp
   geometry_msgs
   visualization_msgs
+  tf2_ros
 )
 target_include_directories(ekf_lib PUBLIC include ${EIGEN3_INCLUDE_DIR})
 

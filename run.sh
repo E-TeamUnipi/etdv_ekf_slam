@@ -1,19 +1,20 @@
 #!/bin/bash
 source /opt/ros/humble/setup.bash
 
-# Build workspace completo se non esiste
-if [ ! -d "/ros2_ws/install" ]; then
-    echo "Building ROS2 workspace..."
-    cd /ros2_ws
-    colcon build
-fi
+# 1. Pulisce SOLO la cache dei pacchetti a cui stai lavorando (NON tutto l'install!)
+echo "Cleaning development cache..."
+rm -rf /ros2_ws/build/ekf_slam /ros2_ws/install/ekf_slam
+rm -rf /ros2_ws/build/circular_controller /ros2_ws/install/circular_controller
 
-# Ricompila SEMPRE ekf_slam per includere le modifiche più recenti
-echo "Building ekf_slam package..."
+# 2. Compila tutto il necessario, ma IGNORA esplicitamente il pacchetto rotto
+echo "Building workspace..."
 cd /ros2_ws
-colcon build --packages-select ekf_slam
+colcon build --symlink-install --packages-ignore etdv_slam
+
+# 3. Source dell'ambiente
 source /ros2_ws/install/setup.bash
 
+# 4. Lancio dei nodi
 ros2 launch foxglove_bridge foxglove_bridge_launch.xml &
 sleep 2
 
