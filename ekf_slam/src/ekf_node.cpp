@@ -58,38 +58,57 @@ private:
     last_vy_ = msg->twist.twist.linear.y;
   }
 
+  // Sostituisci la parte finale della imuCallback così:
   void imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg) {
     std::lock_guard<std::mutex> lock(ekf_mutex_);
 
     rclcpp::Time now(msg->header.stamp, this->get_clock()->get_clock_type());
-
-    if (first_odom_) {
-      last_update_time_ = now;
-      first_odom_ = false;
-      return;
-    }
+    if (first_odom_) { last_update_time_ = now; first_odom_ = false; return; }
 
     double dt = (now - last_update_time_).seconds();
-    last_omega_ = msg->angular_velocity.z;
+    if (dt <= 0.0) return;
 
-    if (dt > 0.0) {
-      ekf_->predict(last_v_, last_vy_, last_omega_, dt);
-      last_update_time_ = now;
+    double ax = msg->linear_acceleration.x;
+    double ay = msg->linear_acceleration.y;
+    double w  = msg->angular_velocity.z;
+
+    // FASE 1: Predict
+    ekf_->predict(ax, ay, dt);
+
+    // FASE 2: Correct e Debug
+    double y = 0.0;
+    double k = 0.0;
+    ekf_->correctGyro(w, y, k); 
+    
+    // LOGGING PULITO DAL NODO
+    static int counter = 0;
+    if (counter++ % 20 == 0) {
+        RCLCPP_INFO(this->get_logger(), 
+            "DEBUG Gyro -> Innovazione(y): %.4f, KalmanGain(K): %.6f", 
+            y, k);
     }
-  }
+
+    last_update_time_ = now;
+}
 
   void publishPose() {
     if (first_odom_) return;
 
-    Eigen::Vector3d state;
+    // CORREZIONE: Usa VectorXd perché lo stato ora è 6D
+    Eigen::VectorXd state; 
     {
       std::lock_guard<std::mutex> lock(ekf_mutex_);
       state = ekf_->getState();
     }
 
+    // Assicurati che lo stato sia pronto (evita pubblicare se è tutto zero all'inizio)
+    if (state.size() < 6) return; 
+
     geometry_msgs::msg::PoseStamped pst;
     pst.header.stamp    = this->get_clock()->now();
-    pst.header.frame_id = "map"; // O "odom"
+    pst.header.frame_id = "map"; 
+    
+    // Ora il tuo stato ha 6 elementi, i primi 3 sono [x, y, theta]
     pst.pose.position.x = state(0);
     pst.pose.position.y = state(1);
     pst.pose.position.z = 0.0;

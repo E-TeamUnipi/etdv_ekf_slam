@@ -1,10 +1,10 @@
 #!/bin/bash
 source /opt/ros/humble/setup.bash
 
-# 1. Pulisce SOLO la cache dei pacchetti a cui stai lavorando (NON tutto l'install!)
-echo "Cleaning development cache..."
-rm -rf /ros2_ws/build/ekf_slam /ros2_ws/install/ekf_slam
-rm -rf /ros2_ws/build/circular_controller /ros2_ws/install/circular_controller
+# # 1. Pulisce SOLO la cache dei pacchetti a cui stai lavorando (NON tutto l'install!)
+# echo "Cleaning development cache..."
+# rm -rf /ros2_ws/build/ekf_slam /ros2_ws/install/ekf_slam
+# rm -rf /ros2_ws/build/circular_controller /ros2_ws/install/circular_controller
 
 # 2. Compila tutto il necessario, ma IGNORA esplicitamente il pacchetto rotto
 echo "Building workspace..."
