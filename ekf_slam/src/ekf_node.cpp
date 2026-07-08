@@ -4,6 +4,7 @@
 #include <sensor_msgs/msg/imu.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 #include <geometry_msgs/msg/transform_stamped.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 #include <mutex>
 #include <memory>
 
@@ -25,134 +26,108 @@ public:
     double nw  = this->get_parameter("process_noise_omega").as_double();
 
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
-    
     ekf_->setProcessNoise(nv, nvy, nw);
 
-    // Sottoscrizioni
-    sub_vel_ = this->create_subscription<geometry_msgs::msg::TwistWithCovarianceStamped>(
-        "/pacsim/velocity", 10,
-        std::bind(&EKFPoseNode::velocityCallback, this, _1));
-
-    sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(
-        "/pacsim/imu/cog_imu", 10,
-        std::bind(&EKFPoseNode::imuCallback, this, _1));
-
+    sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>("/pacsim/imu/cog_imu", 10, std::bind(&EKFPoseNode::imuCallback, this, _1));
     pub_pose_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/ekf_pose_only", 10);
+    pub_odom_ = this->create_publisher<nav_msgs::msg::Odometry>("/ekf/odometry", 10);
 
-    timer_viz_ = rclcpp::create_timer(
-        this, this->get_clock(), rclcpp::Duration::from_seconds(0.05), // 20 Hz
-        std::bind(&EKFPoseNode::publishPose, this));
+    timer_viz_ = rclcpp::create_timer(this, this->get_clock(), rclcpp::Duration::from_seconds(0.05), std::bind(&EKFPoseNode::publishOdometry, this));
 
     first_odom_ = true;
-    last_v_  = 0.0;
-    last_vy_ = 0.0;
-    last_omega_ = 0.0;
-
-    RCLCPP_INFO(this->get_logger(), "EKF Pose-Only Node initialized.");
+    RCLCPP_INFO(this->get_logger(), "EKF Node pulito e avviato.");
   }
 
 private:
-  void velocityCallback(const geometry_msgs::msg::TwistWithCovarianceStamped::SharedPtr msg) {
-    std::lock_guard<std::mutex> lock(ekf_mutex_);
-    last_v_  = msg->twist.twist.linear.x;
-    last_vy_ = msg->twist.twist.linear.y;
-  }
 
-  // Sostituisci la parte finale della imuCallback così:
   void imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg) {
     std::lock_guard<std::mutex> lock(ekf_mutex_);
 
     rclcpp::Time now(msg->header.stamp, this->get_clock()->get_clock_type());
     if (first_odom_) { last_update_time_ = now; first_odom_ = false; return; }
-
     double dt = (now - last_update_time_).seconds();
     if (dt <= 0.0) return;
 
-    double ax = msg->linear_acceleration.x;
-    double ay = msg->linear_acceleration.y;
-    double w  = msg->angular_velocity.z;
-
-    // FASE 1: Predict
-    ekf_->predict(ax, ay, dt);
-
-    // FASE 2: Correct e Debug
-    double y = 0.0;
-    double k = 0.0;
-    ekf_->correctGyro(w, y, k); 
-    
-    // LOGGING PULITO DAL NODO
-    static int counter = 0;
-    if (counter++ % 20 == 0) {
-        RCLCPP_INFO(this->get_logger(), 
-            "DEBUG Gyro -> Innovazione(y): %.4f, KalmanGain(K): %.6f", 
-            y, k);
-    }
-
+    ekf_->predict(msg->linear_acceleration.x, msg->linear_acceleration.y, dt);
+    double y, k;
+    ekf_->correctGyro(msg->angular_velocity.z, y, k); 
     last_update_time_ = now;
-}
+  }
 
-  void publishPose() {
+  void publishOdometry() {
     if (first_odom_) return;
+    
+    Eigen::VectorXd state;
+    Eigen::MatrixXd P;
 
-    // CORREZIONE: Usa VectorXd perché lo stato ora è 6D
-    Eigen::VectorXd state; 
     {
-      std::lock_guard<std::mutex> lock(ekf_mutex_);
-      state = ekf_->getState();
+        std::lock_guard<std::mutex> lock(ekf_mutex_);
+        if (first_odom_) return;
+        state = ekf_->getState();
+        P = ekf_->getCovariance();
     }
 
-    // Assicurati che lo stato sia pronto (evita pubblicare se è tutto zero all'inizio)
-    if (state.size() < 6) return; 
+    nav_msgs::msg::Odometry odom;
+    odom.header.stamp = this->now();
+    odom.header.frame_id = "map";
+    odom.child_frame_id = "ekf_estimate";
 
-    geometry_msgs::msg::PoseStamped pst;
-    pst.header.stamp    = this->get_clock()->now();
-    pst.header.frame_id = "map"; 
+    // Mappa stato in Pose
+    odom.pose.pose.position.x = state(0);
+    odom.pose.pose.position.y = state(1);
+    odom.pose.pose.orientation.z = std::sin(state(2) * 0.5);
+    odom.pose.pose.orientation.w = std::cos(state(2) * 0.5);
+
+    // Mappa Covarianza P (6x6) in Pose Covariance (36 elementi)
+    // L'ordine ROS è: [x, y, z, roll, pitch, yaw]
+    // La tua matrice P è: [x, y, theta, vx, vy, omega]
+    // Dobbiamo mappare le righe/colonne 0,1,2 di P negli indici corrispondenti
     
-    // Ora il tuo stato ha 6 elementi, i primi 3 sono [x, y, theta]
-    pst.pose.position.x = state(0);
-    pst.pose.position.y = state(1);
-    pst.pose.position.z = 0.0;
+    // Inizializza covarianza a 0
+    odom.pose.covariance.fill(0.0);
+    
+    // Mappa x, y, yaw (che è l'indice 2 del tuo stato)
+    // ROS Odometry richiede x=0, y=1, yaw=5 (nelle ultime 3 posizioni di 6)
+    odom.pose.covariance[0]  = P(0,0); // Cov(x,x)
+    odom.pose.covariance[1]  = P(0,1); // Cov(x,y)
+    odom.pose.covariance[5]  = P(0,2); // Cov(x,yaw)
+    
+    odom.pose.covariance[6]  = P(1,0); // Cov(y,x)
+    odom.pose.covariance[7]  = P(1,1); // Cov(y,y)
+    odom.pose.covariance[11] = P(1,2); // Cov(y,yaw)
+    
+    odom.pose.covariance[30] = P(2,0); // Cov(yaw,x)
+    odom.pose.covariance[31] = P(2,1); // Cov(yaw,y)
+    odom.pose.covariance[35] = P(2,2); // Cov(yaw,yaw)
 
-    double cy = std::cos(state(2) * 0.5);
-    double sy = std::sin(state(2) * 0.5);
-    pst.pose.orientation.x = 0.0;
-    pst.pose.orientation.y = 0.0;
-    pst.pose.orientation.z = sy;
-    pst.pose.orientation.w = cy;
+    pub_odom_->publish(odom);
 
-    pub_pose_->publish(pst);
-
-    // Dopo aver pubblicato pst (PoseStamped)
+    // --- AGGIUNGI QUESTO PER IL SDR IN MOVIMENTO ---
     geometry_msgs::msg::TransformStamped t;
-    t.header.stamp = pst.header.stamp;
+    t.header.stamp = odom.header.stamp;
     t.header.frame_id = "map";
-    t.child_frame_id = "ekf_estimate"; // Questo è il nome che vedrai in Foxglove
+    t.child_frame_id = "ekf_estimate"; // Il nome del tuo SDR
 
     t.transform.translation.x = state(0);
     t.transform.translation.y = state(1);
     t.transform.translation.z = 0.0;
-
-    // Converti l'orientazione (quaternione)
-    t.transform.rotation = pst.pose.orientation;
+    
+    // Usiamo la stessa orientazione che abbiamo già calcolato
+    t.transform.rotation = odom.pose.pose.orientation; 
 
     tf_broadcaster_->sendTransform(t);
-  }
+}
 
   rclcpp::Subscription<geometry_msgs::msg::TwistWithCovarianceStamped>::SharedPtr sub_vel_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_pose_;
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_odom_;
   rclcpp::TimerBase::SharedPtr timer_viz_;
-
-
-  std::unique_ptr<tf2_ros::TransformBroadcaster>    tf_broadcaster_;
-  std::shared_ptr<EKFPose>                          ekf_;
-  std::mutex                                        ekf_mutex_;
-  rclcpp::Time                                      last_update_time_;
-  
-  bool   first_odom_;
-  double last_v_;
-  double last_vy_;
-  double last_omega_;
+  std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+  std::shared_ptr<EKFPose> ekf_;
+  std::mutex ekf_mutex_;
+  rclcpp::Time last_update_time_;
+  bool first_odom_;
 };
 
 int main(int argc, char **argv) {

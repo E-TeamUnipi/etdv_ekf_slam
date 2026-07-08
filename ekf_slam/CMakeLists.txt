@@ -10,6 +10,8 @@ find_package(geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(std_srvs)
+find_package(nav_msgs)
 
 # -----------------------------
 # Include directories
@@ -28,6 +30,8 @@ ament_target_dependencies(ekf_lib
   geometry_msgs
   visualization_msgs
   tf2_ros
+  std_srvs
+  nav_msgs
 )
 target_include_directories(ekf_lib PUBLIC include ${EIGEN3_INCLUDE_DIR})
 
