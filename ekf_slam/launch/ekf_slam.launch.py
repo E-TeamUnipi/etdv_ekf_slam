@@ -15,7 +15,15 @@ def generate_launch_description():
             package='ekf_slam',
             executable='ekf_node',
             name='ekf_node',
-            parameters=[params_file],
-            output='screen'
+            output='screen',
+            parameters=[params_file, {'use_sim_time': True}]
+        ),
+
+        Node(
+            package='ekf_slam',
+            executable='tf_to_pose.py',
+            name='tf_to_pose_bridge',
+            output='screen',
+            parameters=[{'use_sim_time': True}]
         )
     ])

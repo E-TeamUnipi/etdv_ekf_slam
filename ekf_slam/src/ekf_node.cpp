@@ -5,6 +5,7 @@
 #include <tf2_ros/transform_broadcaster.h>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
+#include <nav_msgs/msg/path.hpp>
 #include <mutex>
 #include <memory>
 
@@ -31,6 +32,7 @@ public:
     sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>("/pacsim/imu/cog_imu", 10, std::bind(&EKFPoseNode::imuCallback, this, _1));
     pub_pose_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/ekf_pose_only", 10);
     pub_odom_ = this->create_publisher<nav_msgs::msg::Odometry>("/ekf/odometry", 10);
+    pub_path_ = this->create_publisher<nav_msgs::msg::Path>("/ekf/trajectory", 10);
 
     timer_viz_ = rclcpp::create_timer(this, this->get_clock(), rclcpp::Duration::from_seconds(0.05), std::bind(&EKFPoseNode::publishOdometry, this));
 
@@ -116,12 +118,31 @@ private:
     t.transform.rotation = odom.pose.pose.orientation; 
 
     tf_broadcaster_->sendTransform(t);
+
+    // Configura l'header del Path
+    path_msg_.header.stamp = this->now();
+    path_msg_.header.frame_id = "map";
+
+    // Crea un nuovo punto (PoseStamped) estraendo i dati da Odom
+    geometry_msgs::msg::PoseStamped current_pose;
+    current_pose.header = path_msg_.header;
+    current_pose.pose = odom.pose.pose;
+
+    // Aggiungi il punto alla lista
+    path_msg_.poses.push_back(current_pose);
+
+    // Pubblica l'intera traiettoria
+    pub_path_->publish(path_msg_);
 }
 
   rclcpp::Subscription<geometry_msgs::msg::TwistWithCovarianceStamped>::SharedPtr sub_vel_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_pose_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_odom_;
+  // ====== gestione disegno traccia ======
+  rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pub_path_;
+  nav_msgs::msg::Path path_msg_;
+  // ======================================
   rclcpp::TimerBase::SharedPtr timer_viz_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   std::shared_ptr<EKFPose> ekf_;
