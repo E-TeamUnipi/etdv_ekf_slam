@@ -8,7 +8,9 @@ public:
     EKFPose();
     void setProcessNoise(double noise_ax, double noise_ay, double noise_omega);
     void predict(double ax, double ay, double gyro_z, double dt);
-    void correctGyro(double z_gyro, double& out_y, double& out_k);
+    void correctPosition(double map_x, double map_y, double local_x, double local_y);
+    void setState(const Eigen::VectorXd& state) { x_ = state; }
+    void setCovariance(const Eigen::MatrixXd& cov) { P_ = cov; }
     
     Eigen::MatrixXd getCovariance() const { return P_; }
     Eigen::VectorXd getState() const { return x_; }

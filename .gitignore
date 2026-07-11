@@ -4,6 +4,7 @@
 build/
 install/
 log/
+etdv_slam_new/
 
 # colcon metadata
 .colcon/

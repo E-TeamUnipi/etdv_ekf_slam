@@ -9,7 +9,7 @@ EKFPose::EKFPose() {
 }   
 
 void EKFPose::setProcessNoise(double nv, double nvy, double nw) {
-    Q_.diagonal() << nv*nv, nv*nv, nw*nw, nvy*nvy, nvy*nvy, nw*nw;
+    Q_.diagonal() << 1e-4, 1e-4, 1e-4, nv*nv, nvy*nvy, nw*nw;
 }
 
 double EKFPose::normalizeAngle(double a) {
@@ -71,21 +71,58 @@ void EKFPose::predict(double ax, double ay, double gyro_z, double dt) {
     x_ = next_x;
 }
 
-void EKFPose::correctGyro(double z_gyro, double& out_y, double& out_k) {
-    Eigen::MatrixXd H = Eigen::MatrixXd::Zero(1, 6);
-    H(0, 5) = 1.0; 
-    Eigen::MatrixXd z(1, 1);
-    z(0, 0) = z_gyro;
+void EKFPose::correctPosition(double map_x, double map_y, double local_x, double local_y) {
+    double curr_x = x_(0);
+    double curr_y = x_(1);
+    double curr_th = x_(2);
 
-    Eigen::MatrixXd y_mat = z - H * x_; 
-    double y = y_mat(0, 0); 
-    Eigen::MatrixXd S = H * P_ * H.transpose() + R_;
+    // --- 1. MODELLO DI OSSERVAZIONE ---
+    // Differenza tra il cono e la vettura nel frame globale
+    double dx = map_x - curr_x;
+    double dy = map_y - curr_y;
+
+    // Dove "dovremmo" vedere il cono nel frame del LiDAR in base alla stima attuale?
+    double expected_local_x = dx * std::cos(curr_th) + dy * std::sin(curr_th);
+    double expected_local_y = -dx * std::sin(curr_th) + dy * std::cos(curr_th);
+
+    // Vettore dell'innovazione z - h(x) (Errore tra misura reale e misura attesa)
+    Eigen::VectorXd y_mat(2);
+    y_mat(0) = local_x - expected_local_x;
+    y_mat(1) = local_y - expected_local_y;
+
+    // --- 2. JACOBIANO DELL'OSSERVAZIONE (H) ---
+    // Derivate parziali di expected_local_x/y rispetto a [x, y, theta]
+    Eigen::MatrixXd H = Eigen::MatrixXd::Zero(2, 6);
+    
+    // Rispetto a X
+    H(0, 0) = -std::cos(curr_th);
+    H(1, 0) = std::sin(curr_th);
+    
+    // Rispetto a Y
+    H(0, 1) = -std::sin(curr_th);
+    H(1, 1) = -std::cos(curr_th);
+    
+    // Rispetto a Theta
+    H(0, 2) = -dx * std::sin(curr_th) + dy * std::cos(curr_th);
+    H(1, 2) = -dx * std::cos(curr_th) - dy * std::sin(curr_th);
+
+    // --- 3. UPDATE KALMAN ---
+    Eigen::MatrixXd R_pos = Eigen::MatrixXd::Identity(2, 2) * 0.1; // Aumentato leggermente per stabilità
+    Eigen::MatrixXd S = H * P_ * H.transpose() + R_pos;
+
+    // Gating di Mahalanobis
+    if (y_mat.transpose() * S.inverse() * y_mat > 25.0) return; 
+
     Eigen::MatrixXd K = P_ * H.transpose() * S.inverse();
 
-    out_y = y;
-    out_k = K(5, 0);
-
+    // Aggiornamento Stato
     x_ = x_ + K * y_mat;
+    
+    // Normalizziamo l'angolo dopo l'update per evitare salti
+    x_(2) = normalizeAngle(x_(2));
+
+    // Joseph Form per la Covarianza
     Eigen::MatrixXd I = Eigen::MatrixXd::Identity(6, 6);
-    P_ = (I - K * H) * P_;
+    Eigen::MatrixXd IKH = I - K * H;
+    P_ = IKH * P_ * IKH.transpose() + K * R_pos * K.transpose();
 }

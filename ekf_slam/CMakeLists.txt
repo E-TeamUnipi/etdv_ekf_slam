@@ -12,6 +12,7 @@ find_package(Eigen3 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(std_srvs)
 find_package(nav_msgs)
+find_package(pacsim)
 
 # -----------------------------
 # Include directories
@@ -32,6 +33,7 @@ ament_target_dependencies(ekf_lib
   tf2_ros
   std_srvs
   nav_msgs
+  pacsim
 )
 target_include_directories(ekf_lib PUBLIC include ${EIGEN3_INCLUDE_DIR})
 
