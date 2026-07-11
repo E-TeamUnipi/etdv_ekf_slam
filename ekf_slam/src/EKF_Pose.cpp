@@ -18,28 +18,41 @@ double EKFPose::normalizeAngle(double a) {
     return a;
 }
 
-void EKFPose::predict(double ax, double ay, double dt) {
+void EKFPose::predict(double ax, double ay, double gyro_z, double dt) {
     double th = x_(2);
     double vx = x_(3);
     double vy = x_(4);
-    double omega = x_(5);
+    double b_w = x_(5); // Ora x(5) è il bias del giroscopio
+
+    // La rotazione reale è quella misurata meno il bias stimato
+    double omega = gyro_z - b_w;
 
     Eigen::VectorXd next_x(6);
+    // Integrazione cinematica
     next_x(0) = x_(0) + (vx * std::cos(th) - vy * std::sin(th)) * dt;
     next_x(1) = x_(1) + (vx * std::sin(th) + vy * std::cos(th)) * dt;
     next_x(2) = normalizeAngle(x_(2) + omega * dt);
     next_x(3) = vx + (ax + omega * vy) * dt; 
     next_x(4) = vy + (ay - omega * vx) * dt; 
-    next_x(5) = omega;
+    next_x(5) = b_w; // Il bias evolve (o resta costante)
 
+    // Aggiornamento dello Jacobiano F (6x6)
     Eigen::MatrixXd F = Eigen::MatrixXd::Identity(6, 6);
+    
+    // Derivate per X e Y rispetto a Theta
     F(0, 2) = (-vx * std::sin(th) - vy * std::cos(th)) * dt;
-    F(0, 3) = std::cos(th) * dt; F(0, 4) = -std::sin(th) * dt;
     F(1, 2) = ( vx * std::cos(th) - vy * std::sin(th)) * dt;
+    
+    // Derivate per Theta rispetto al bias (negativo perché omega = gyro - bias)
+    F(2, 5) = -dt; 
+    
+    // Derivate velocità
+    F(3, 4) = omega * dt;  F(3, 5) = -vy * dt; // Influenzato dal bias
+    F(4, 3) = -omega * dt; F(4, 5) = vx * dt;  // Influenzato dal bias
+
+    // F(0,3), F(0,4), F(1,3), F(1,4) rimangono come nel tuo codice originale
+    F(0, 3) = std::cos(th) * dt; F(0, 4) = -std::sin(th) * dt;
     F(1, 3) = std::sin(th) * dt; F(1, 4) = std::cos(th) * dt;
-    F(2, 5) = dt;
-    F(3, 4) = omega * dt;  F(3, 5) = vy * dt;
-    F(4, 3) = -omega * dt; F(4, 5) = -vx * dt;
 
     P_ = F * P_ * F.transpose() + Q_;
     x_ = next_x;

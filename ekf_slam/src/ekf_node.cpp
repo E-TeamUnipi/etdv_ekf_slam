@@ -42,7 +42,7 @@ public:
 
 private:
 
-  void imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg) {
+void imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg) {
     std::lock_guard<std::mutex> lock(ekf_mutex_);
 
     rclcpp::Time now(msg->header.stamp, this->get_clock()->get_clock_type());
@@ -50,11 +50,14 @@ private:
     double dt = (now - last_update_time_).seconds();
     if (dt <= 0.0) return;
 
-    ekf_->predict(msg->linear_acceleration.x, msg->linear_acceleration.y, dt);
-    double y, k;
-    ekf_->correctGyro(msg->angular_velocity.z, y, k); 
+    // Passiamo tutto in un colpo solo
+    ekf_->predict(msg->linear_acceleration.x, 
+                  msg->linear_acceleration.y, 
+                  msg->angular_velocity.z, 
+                  dt);
+    
     last_update_time_ = now;
-  }
+}
 
   void publishOdometry() {
     if (first_odom_) return;
@@ -69,6 +72,8 @@ private:
         P = ekf_->getCovariance();
     }
 
+    RCLCPP_INFO(this->get_logger(), "Bias stimato (rad/s): %f", state(5));
+    
     nav_msgs::msg::Odometry odom;
     odom.header.stamp = this->now();
     odom.header.frame_id = "map";

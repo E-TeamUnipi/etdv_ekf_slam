@@ -7,7 +7,7 @@ class EKFPose {
 public:
     EKFPose();
     void setProcessNoise(double noise_ax, double noise_ay, double noise_omega);
-    void predict(double ax, double ay, double dt);
+    void predict(double ax, double ay, double gyro_z, double dt);
     void correctGyro(double z_gyro, double& out_y, double& out_k);
     
     Eigen::MatrixXd getCovariance() const { return P_; }
