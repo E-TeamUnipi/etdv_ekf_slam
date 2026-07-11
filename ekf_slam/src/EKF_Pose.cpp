@@ -22,37 +22,50 @@ void EKFPose::predict(double ax, double ay, double gyro_z, double dt) {
     double th = x_(2);
     double vx = x_(3);
     double vy = x_(4);
-    double b_w = x_(5); // Ora x(5) è il bias del giroscopio
+    double b_w = x_(5);
 
     // La rotazione reale è quella misurata meno il bias stimato
     double omega = gyro_z - b_w;
 
+    // --- INTEGRAZIONE AL 2° ORDINE (PUNTO MEDIO) ---
+    // Invece di usare l'angolo iniziale, calcoliamo l'angolo a metà del dt
+    double th_mid = th + omega * (dt / 2.0);
+
     Eigen::VectorXd next_x(6);
-    // Integrazione cinematica
-    next_x(0) = x_(0) + (vx * std::cos(th) - vy * std::sin(th)) * dt;
-    next_x(1) = x_(1) + (vx * std::sin(th) + vy * std::cos(th)) * dt;
-    next_x(2) = normalizeAngle(x_(2) + omega * dt);
+    // Usiamo th_mid per proiettare le velocità, simulando una traiettoria curva
+    next_x(0) = x_(0) + (vx * std::cos(th_mid) - vy * std::sin(th_mid)) * dt;
+    next_x(1) = x_(1) + (vx * std::sin(th_mid) + vy * std::cos(th_mid)) * dt;
+    next_x(2) = normalizeAngle(th + omega * dt); // L'angolo finale avanza normalmente
     next_x(3) = vx + (ax + omega * vy) * dt; 
     next_x(4) = vy + (ay - omega * vx) * dt; 
-    next_x(5) = b_w; // Il bias evolve (o resta costante)
+    next_x(5) = b_w; 
 
-    // Aggiornamento dello Jacobiano F (6x6)
+    // --- AGGIORNAMENTO DELLO JACOBIANO F ---
     Eigen::MatrixXd F = Eigen::MatrixXd::Identity(6, 6);
     
-    // Derivate per X e Y rispetto a Theta
-    F(0, 2) = (-vx * std::sin(th) - vy * std::cos(th)) * dt;
-    F(1, 2) = ( vx * std::cos(th) - vy * std::sin(th)) * dt;
+    // Derivate di X e Y rispetto a Theta (usando th_mid)
+    F(0, 2) = (-vx * std::sin(th_mid) - vy * std::cos(th_mid)) * dt;
+    F(1, 2) = ( vx * std::cos(th_mid) - vy * std::sin(th_mid)) * dt;
     
-    // Derivate per Theta rispetto al bias (negativo perché omega = gyro - bias)
-    F(2, 5) = -dt; 
-    
-    // Derivate velocità
-    F(3, 4) = omega * dt;  F(3, 5) = -vy * dt; // Influenzato dal bias
-    F(4, 3) = -omega * dt; F(4, 5) = vx * dt;  // Influenzato dal bias
+    // Derivate di X e Y rispetto alle velocità (usando th_mid)
+    F(0, 3) = std::cos(th_mid) * dt; 
+    F(0, 4) = -std::sin(th_mid) * dt;
+    F(1, 3) = std::sin(th_mid) * dt; 
+    F(1, 4) = std::cos(th_mid) * dt;
 
-    // F(0,3), F(0,4), F(1,3), F(1,4) rimangono come nel tuo codice originale
-    F(0, 3) = std::cos(th) * dt; F(0, 4) = -std::sin(th) * dt;
-    F(1, 3) = std::sin(th) * dt; F(1, 4) = std::cos(th) * dt;
+    // Derivata di Theta rispetto al bias
+    F(2, 5) = -dt; 
+
+    // NOVITÀ: Derivate incrociate di X e Y rispetto al bias!
+    // Siccome th_mid dipende da b_w, applichiamo la chain rule: d(th_mid)/d(b_w) = -dt/2
+    F(0, 5) = F(0, 2) * (-dt / 2.0);
+    F(1, 5) = F(1, 2) * (-dt / 2.0);
+    
+    // Derivate per l'aggiornamento delle velocità
+    F(3, 4) = omega * dt;  
+    F(3, 5) = -vy * dt; // Il bias influenza l'accelerazione di Coriolis calcolata
+    F(4, 3) = -omega * dt; 
+    F(4, 5) = vx * dt;
 
     P_ = F * P_ * F.transpose() + Q_;
     x_ = next_x;
