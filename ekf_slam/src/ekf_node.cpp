@@ -36,7 +36,7 @@ public:
     double nw  = this->get_parameter("process_noise_omega").as_double();
     double nlx  = this->get_parameter("lidar_noise_x").as_double();
     double nly = this->get_parameter("lidar_noise_y").as_double();
-    double threshold = this->get_parameter("association_threshold").as_double();
+    threshold = this->get_parameter("association_threshold").as_double();
 
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     ekf_->setProcessNoise(nv, nvy, nw, nlx, nly);
@@ -128,66 +128,19 @@ void conesCallback(const pacsim::msg::PerceptionDetections::SharedPtr msg) {
     double pred_x = state(0);
     double pred_y = state(1);
     double pred_th = state(2);
-    double threshold = this->get_parameter("association_threshold").as_double();
 
-    // --- FASE 2: CORREZIONE STORICA ---
+   // --- FASE 2: CORREZIONE STORICA ---
+
     for (const auto& perceived_cone : msg->detections) {
         double local_x = perceived_cone.pose.pose.position.x;
         double local_y = perceived_cone.pose.pose.position.y;
 
-        double global_cone_x = pred_x + (local_x * std::cos(pred_th) - local_y * std::sin(pred_th));
-        double global_cone_y = pred_y + (local_x * std::sin(pred_th) + local_y * std::cos(pred_th));
-
-        // double map_cone_x, map_cone_y;
-        int matched_id = findNearestMapCone(global_cone_x, global_cone_y, threshold);
+        int matched_id = ekf_->dataAssociation(local_x, local_y, threshold);
 
         if (matched_id >= 0) {
-            
-            // Addio Finto GPS, passiamo le coordinate crude!
             ekf_->correctPosition(matched_id, local_x, local_y);
-            
-            state = ekf_->getState();
-            pred_x = state(0);
-            pred_y = state(1);
-            pred_th = state(2);
-
         } else {
-
-            // ==========================================
-            // MATCH FALLITO: State Augmentation (Nuovo Cono)
-            // ==========================================
-            
-            // 1. Estraiamo la covarianza corrente del veicolo (blocco 3x3)
-            Eigen::MatrixXd P = ekf_->getCovariance();
-            Eigen::Matrix3d P_vv = P.block<3, 3>(0, 0);
-            
-            // 2. Calcoliamo le distanze relative (dx, dy)
-            double dx = global_cone_x - pred_x;
-            double dy = global_cone_y - pred_y;
-            
-            // 3. Jacobiano rispetto allo stato del veicolo (G_X)
-            Eigen::Matrix<double, 2, 3> G_X;
-            G_X << 1.0, 0.0, -dy,
-                   0.0, 1.0,  dx;
-                   
-            // 4. Jacobiano rispetto alla misurazione LiDAR (G_z)
-            Eigen::Matrix2d G_z;
-            G_z << std::cos(pred_th), -std::sin(pred_th),
-                   std::sin(pred_th),  std::cos(pred_th);
-                   
-            // 5. Calcolo della covarianza iniziale del landmark
-            // NOTA: R_lidar_ deve essere la matrice 2x2 del rumore del sensore, 
-            // che idealmente dovresti rendere accessibile dal nodo o dentro la classe EKF.
-            Eigen::Matrix2d initial_landmark_cov = 
-                G_X * P_vv * G_X.transpose() + G_z * ekf_->getR() * G_z.transpose();
-                
-            // 6. Espansione dinamica del vettore di stato e della matrice P
-            ekf_->addNewLandmark(global_cone_x, global_cone_y, initial_landmark_cov);
-
-            state = ekf_->getState();
-            pred_x = state(0);
-            pred_y = state(1);
-            pred_th = state(2);
+            ekf_->addNewLandmark(local_x, local_y);
         }
     }
 
@@ -223,8 +176,8 @@ void conesCallback(const pacsim::msg::PerceptionDetections::SharedPtr msg) {
     accumulated_latency_ms_ += (duration_us / 1000.0);
     latency_counter_++;
 
-    // 4. Stampa la media ogni 100 cicli e resetta
-    if (latency_counter_ >= 100) {
+    // 4. Stampa la media ogni 10 cicli e resetta
+    if (latency_counter_ >= 10) {
         double avg_latency = accumulated_latency_ms_ / 100.0;
         
         RCLCPP_INFO(this->get_logger(), 
@@ -238,29 +191,29 @@ void conesCallback(const pacsim::msg::PerceptionDetections::SharedPtr msg) {
 
 }
 
-int findNearestMapCone(double global_cone_x, double global_cone_y, double threshold) {
-    Eigen::VectorXd current_state = ekf_->getState();
-    int state_size = current_state.size();
+// int findNearestMapCone(double global_cone_x, double global_cone_y, double threshold) {
+//     Eigen::VectorXd current_state = ekf_->getState();
+//     int state_size = current_state.size();
     
-    if (state_size <= 6) return -1; 
+//     if (state_size <= 6) return -1; 
 
-    int num_cones = (state_size - 6) / 2;
-    int best_id = -1;
-    double min_dist = threshold; 
+//     int num_cones = (state_size - 6) / 2;
+//     int best_id = -1;
+//     double min_dist = threshold; 
 
-    for (int i = 0; i < num_cones; ++i) {
-        double map_x = current_state(6 + 2 * i);
-        double map_y = current_state(6 + 2 * i + 1);
+//     for (int i = 0; i < num_cones; ++i) {
+//         double map_x = current_state(6 + 2 * i);
+//         double map_y = current_state(6 + 2 * i + 1);
 
-        double dist = std::hypot(global_cone_x - map_x, global_cone_y - map_y);
+//         double dist = std::hypot(global_cone_x - map_x, global_cone_y - map_y);
 
-        if (dist < min_dist) {
-            min_dist = dist;
-            best_id = i;
-        }
-    }
-    return best_id;
-}
+//         if (dist < min_dist) {
+//             min_dist = dist;
+//             best_id = i;
+//         }
+//     }
+//     return best_id;
+// }
 
 void mapCallback(const pacsim::msg::Track::SharedPtr msg) {
     // Se abbiamo già scaricato la mappa, ignoriamo i messaggi successivi
@@ -470,6 +423,7 @@ void publishMap() {
   std::mutex ekf_mutex_;
   rclcpp::Time last_update_time_;
   bool first_odom_;
+  double threshold;
 };
 
 int main(int argc, char **argv) {

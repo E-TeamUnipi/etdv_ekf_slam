@@ -1,9 +1,10 @@
 #include "ekf_slam/EKF_Pose.h"
+#include <rclcpp/rclcpp.hpp>
 #include <cmath>
 
 EKFPose::EKFPose() {
     x_ = Eigen::VectorXd::Zero(6);
-    P_ = Eigen::MatrixXd::Identity(6, 6) * 1e-3;
+    P_ = Eigen::MatrixXd::Identity(6, 6) * 0.01;
     Q_ = Eigen::MatrixXd::Identity(6, 6) * 0.01;
     R_ = Eigen::MatrixXd::Identity(2, 2) * 0.01;
 }   
@@ -166,39 +167,134 @@ void EKFPose::correctPosition(int matched_id, double local_x_meas, double local_
 
     // Aggiornamento della Covarianza: P = (I - K*H) * P
     Eigen::MatrixXd I = Eigen::MatrixXd::Identity(state_dim, state_dim);
-    P_ = (I - K * H) * P_;
+    Eigen::MatrixXd I_KH = I - K * H;
+    P_ = I_KH * P_ * I_KH.transpose() + K * R_ * K.transpose();
+    // opzionale ma utile:
 }
 
-void EKFPose::addNewLandmark(double map_cone_x, double map_cone_y, const Eigen::Matrix2d& initial_landmark_cov){
-    
+void EKFPose::addNewLandmark(double local_x, double local_y) {
     int current_dim = x_.size();
-    int new_dim = current_dim + LANDMARK_DIM;
+    int new_dim = current_dim + 2;
+
+    double x_v = x_(0);
+    double y_v = x_(1);
+    double theta_v = x_(2);
+
+    double c_th = std::cos(theta_v);
+    double s_th = std::sin(theta_v);
+
+    // Proiezione Globale
+    double map_x = x_v + local_x * c_th - local_y * s_th;
+    double map_y = y_v + local_x * s_th + local_y * c_th;
+
+    double dx = map_x - x_v;
+    double dy = map_y - y_v;
+
+    // Jacobiani
+    Eigen::Matrix<double, 2, 3> G_X;
+    G_X << 1.0, 0.0, -dy,
+           0.0, 1.0,  dx;
+
+    Eigen::Matrix2d G_z;
+    G_z << c_th, -s_th,
+           s_th,  c_th;
 
     // ==========================================
-    // 1. ESPANSIONE DEL VETTORE DI STATO (X)
+    // LA CHIAVE DELLA SLAM: Covarianza Incrociata
+    // Moltiplicando il blocco (current_dim x 3) per G_X^T, 
+    // leghiamo il nuovo cono a TUTTI gli stati esistenti!
     // ==========================================
-    // conservativeResize espande il vettore mantenendo i vecchi valori intatti
+    Eigen::MatrixXd P_cross = P_.block(0, 0, current_dim, 3) * G_X.transpose();
+
+    Eigen::Matrix3d P_vv = P_.block(0, 0, 3, 3);
+    Eigen::Matrix2d P_ll = G_X * P_vv * G_X.transpose() + G_z * R_ * G_z.transpose();
+
     x_.conservativeResize(new_dim);
-    
-    // Inseriamo le coordinate globali stimate del nuovo cono in coda
-    x_(current_dim)     = map_cone_x;
-    x_(current_dim + 1) = map_cone_y;
+    x_(current_dim) = map_x;
+    x_(current_dim + 1) = map_y;
 
-    // ==========================================
-    // 2. ESPANSIONE DELLA MATRICE DI COVARIANZA (P)
-    // ==========================================
     P_.conservativeResize(new_dim, new_dim);
+    P_.block(0, current_dim, current_dim, 2) = P_cross;               // Colonna
+    P_.block(current_dim, 0, 2, current_dim) = P_cross.transpose();   // Riga
+    P_.block(current_dim, current_dim, 2, 2) = P_ll;                  // Blocco cono
+}
 
-    // ATTENZIONE: conservativeResize lascia memoria non inizializzata nelle nuove righe/colonne!
-    // Dobbiamo azzerare esplicitamente le nuove cross-correlazioni tra il nuovo cono
-    // e tutto il resto del sistema (veicolo + vecchi coni).
-    
-    // Azzera la nuova colonna (in alto a destra)
-    P_.block(0, current_dim, current_dim, LANDMARK_DIM).setZero();
-    
-    // Azzera la nuova riga (in basso a sinistra)
-    P_.block(current_dim, 0, LANDMARK_DIM, current_dim).setZero();
+int EKFPose::dataAssociation(double local_x, double local_y, double mahalanobis_th) {
+    int state_size = x_.size();
+    if (state_size <= 6) return -1; // Nessun cono mappato
 
-    // Inserisci la covarianza iniziale del nuovo cono nel blocco 2x2 in basso a destra
-    P_.block(current_dim, current_dim, LANDMARK_DIM, LANDMARK_DIM) = initial_landmark_cov;
+    int num_cones = (state_size - 6) / 2;
+    int best_id = -1;
+    double min_dist = mahalanobis_th; 
+    double true_min_dist = 1e9;
+
+    double x_v = x_(0);
+    double y_v = x_(1);
+    double theta_v = x_(2);
+    double c_th = std::cos(theta_v);
+    double s_th = std::sin(theta_v);
+    
+    Eigen::Vector2d Z_meas(local_x, local_y);
+
+    for (int i = 0; i < num_cones; ++i) {
+        int landmark_idx = 6 + 2 * i;
+        double m_x = x_(landmark_idx);
+        double m_y = x_(landmark_idx + 1);
+
+        double dx = m_x - x_v;
+        double dy = m_y - y_v;
+
+        Eigen::Vector2d Z_hat;
+        Z_hat(0) = dx * c_th + dy * s_th;
+        Z_hat(1) = -dx * s_th + dy * c_th;
+
+        Eigen::Vector2d Y = Z_meas - Z_hat;
+
+        // gate di sicurezza per non comprendere coni troppo distanti
+        if (Y.norm() > 1.5){
+            continue;
+        }
+
+        // Costruzione dinamica di H per esplorare l'incertezza
+        Eigen::MatrixXd H = Eigen::MatrixXd::Zero(2, state_size);
+        H(0, 0) = -c_th; H(0, 1) = -s_th; H(0, 2) = -dx * s_th + dy * c_th;
+        H(1, 0) =  s_th; H(1, 1) = -c_th; H(1, 2) = -dx * c_th - dy * s_th;
+        H(0, landmark_idx) = c_th; H(0, landmark_idx + 1) = s_th;
+        H(1, landmark_idx) = -s_th; H(1, landmark_idx + 1) = c_th;
+
+        // Matrice dell'Innovazione S
+        Eigen::Matrix2d S = H * P_ * H.transpose() + R_;
+        // --- AGGIUNGI QUESTO "CUSCINETTO" ---
+        // Inflazione del rumore per evitare l'overconfidence (es. 10cm di incertezza minima)
+        double inflation = 0.01; // 10cm di incertezza minima
+        S(0, 0) += inflation;
+        S(1, 1) += inflation;
+        // ------------------------------------
+        // Calcolo della Distanza di Mahalanobis
+        double mahalanobis_dist = Y.transpose() * S.inverse() * Y;
+
+        if (mahalanobis_dist < true_min_dist) true_min_dist = mahalanobis_dist;
+        if (mahalanobis_dist < min_dist) {
+            min_dist = mahalanobis_dist;
+            best_id = i;
+        }
+    }
+
+    double min_euclid = 1e9;
+    int nearest_id = -1;
+    for (int i = 0; i < num_cones; ++i) {
+        int landmark_idx = 6 + 2 * i;
+        double ddx = x_(landmark_idx)     - (x_v + local_x*c_th - local_y*s_th);
+        double ddy = x_(landmark_idx + 1) - (y_v + local_x*s_th + local_y*c_th);
+        double d = std::hypot(ddx, ddy);
+        if (d < min_euclid) { min_euclid = d; nearest_id = i; }
+    }
+    RCLCPP_INFO(rclcpp::get_logger("ekf"), "min_mahalanobis=%.2f (thresh=%.2f) | euclid_nearest=%.3f m (id=%d)",
+                min_dist, mahalanobis_th, min_euclid, nearest_id);
+
+    RCLCPP_INFO(rclcpp::get_logger("ekf"), 
+    "true_min_mahal=%.2f (thresh=%.2f) | euclid=%.3f m (id=%d) | theta=%.3f",
+    true_min_dist, mahalanobis_th, min_euclid, nearest_id, theta_v);
+    
+    return best_id;
 }

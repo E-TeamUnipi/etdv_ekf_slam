@@ -9,7 +9,7 @@ source /opt/ros/humble/setup.bash
 # 2. Compila tutto il necessario, ma IGNORA esplicitamente il pacchetto rotto
 echo "Building workspace..."
 cd /ros2_ws
-colcon build --symlink-install --packages-ignore etdv_slam
+colcon build --symlink-install --packages-ignore etdv_slam --cmake-args -DCMAKE_BUILD_TYPE=Release
 
 # 3. Source dell'ambiente
 source /ros2_ws/install/setup.bash

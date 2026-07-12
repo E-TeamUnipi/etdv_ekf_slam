@@ -6,14 +6,14 @@
     
     # AUMENTA questi valori. Di al robot che le ruote scivolano!
     # Questo aumenta la Matrice P (Incertezza posizione)
-    process_noise_v: 0.2
-    process_noise_vy: 0.2      # Prova 2.5 o 3.0 (era 0.8) -> 0.5 per la simulazione
-    process_noise_omega: 0.005   # Prova 2.5 o 3.0 (era 0.5) -> come sopra
+    process_noise_v: 0.1
+    process_noise_vy: 0.5      # Prova 2.5 o 3.0 (era 0.8) -> 0.5 per la simulazione
+    process_noise_omega: 0.5   # Prova 2.5 o 3.0 (era 0.5) -> come sopra
     
     # RILASSA leggermente questi valori
     # Se sono troppo piccoli, rischi di scartare dati validi
-    lidar_noise_x: 0.062     # 10 cm è più realistico di 5 cm
-    lidar_noise_y: 0.015    # Va bene
+    lidar_noise_x: 0.2     # 10 cm è più realistico di 5 cm
+    lidar_noise_y: 0.2   # Va bene
     
     # IMPORTANTE: Data Association
-    association_threshold: 0.30 # 50.0 è ENORME! -> 5 per la simulazion
+    association_threshold: 5.9 # 50.0 è ENORME! -> 5 per la simulazion
