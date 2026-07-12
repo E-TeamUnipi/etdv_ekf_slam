@@ -8,6 +8,8 @@
 #include <nav_msgs/msg/path.hpp>
 #include "pacsim/msg/perception_detections.hpp"
 #include "pacsim/msg/track.hpp"
+#include <visualization_msgs/msg/marker_array.hpp>
+#include <chrono>
 #include <deque>
 #include <mutex>
 #include <memory>
@@ -24,16 +26,20 @@ public:
     this->declare_parameter("process_noise_v", 0.05);
     this->declare_parameter("process_noise_vy", 0.05);
     this->declare_parameter("process_noise_omega", 0.005);
+    this->declare_parameter("lidar_noise_x", 0.03);
+    this->declare_parameter("lidar_noise_y", 0.03);
     // Dichiara il parametro per il threshold
     this->declare_parameter("association_threshold", 3.9);
 
     double nv  = this->get_parameter("process_noise_v").as_double();
     double nvy = this->get_parameter("process_noise_vy").as_double();
     double nw  = this->get_parameter("process_noise_omega").as_double();
+    double nlx  = this->get_parameter("lidar_noise_x").as_double();
+    double nly = this->get_parameter("lidar_noise_y").as_double();
     double threshold = this->get_parameter("association_threshold").as_double();
 
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
-    ekf_->setProcessNoise(nv, nvy, nw);
+    ekf_->setProcessNoise(nv, nvy, nw, nlx, nly);
 
     // sub e pub ai topic di interesse
     sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>("/pacsim/imu/cog_imu", 10, std::bind(&EKFPoseNode::imuCallback, this, _1));
@@ -43,8 +49,10 @@ public:
     pub_pose_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/ekf_pose_only", 10);
     pub_odom_ = this->create_publisher<nav_msgs::msg::Odometry>("/ekf/odometry", 10);
     pub_path_ = this->create_publisher<nav_msgs::msg::Path>("/ekf/trajectory", 10);
+    pub_map_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/ekf/map_cones", 10);
 
     timer_viz_ = rclcpp::create_timer(this, this->get_clock(), rclcpp::Duration::from_seconds(0.05), std::bind(&EKFPoseNode::publishOdometry, this));
+    timer_map_ = rclcpp::create_timer(this, this->get_clock(), rclcpp::Duration::from_seconds(0.5), std::bind(&EKFPoseNode::publishMap, this));
 
     first_odom_ = true;
     RCLCPP_INFO(this->get_logger(), "EKF Node pulito e avviato.");
@@ -52,7 +60,7 @@ public:
 
 private:
 
-  void imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg) {
+void imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg) {
     std::lock_guard<std::mutex> lock(ekf_mutex_);
 
     rclcpp::Time now(msg->header.stamp, this->get_clock()->get_clock_type());
@@ -88,7 +96,9 @@ private:
     last_update_time_ = now;
 }
 
-  void conesCallback(const pacsim::msg::PerceptionDetections::SharedPtr msg) {
+void conesCallback(const pacsim::msg::PerceptionDetections::SharedPtr msg) {
+    auto start_time = std::chrono::high_resolution_clock::now();
+    
     std::lock_guard<std::mutex> lock(ekf_mutex_);
     
     if (first_odom_ || state_buffer_.empty()) return; 
@@ -128,12 +138,52 @@ private:
         double global_cone_x = pred_x + (local_x * std::cos(pred_th) - local_y * std::sin(pred_th));
         double global_cone_y = pred_y + (local_x * std::sin(pred_th) + local_y * std::cos(pred_th));
 
-        double map_cone_x, map_cone_y;
-        if (findNearestMapCone(global_cone_x, global_cone_y, threshold, map_cone_x, map_cone_y)) {
+        // double map_cone_x, map_cone_y;
+        int matched_id = findNearestMapCone(global_cone_x, global_cone_y, threshold);
+
+        if (matched_id >= 0) {
             
             // Addio Finto GPS, passiamo le coordinate crude!
-            ekf_->correctPosition(map_cone_x, map_cone_y, local_x, local_y);
+            ekf_->correctPosition(matched_id, local_x, local_y);
             
+            state = ekf_->getState();
+            pred_x = state(0);
+            pred_y = state(1);
+            pred_th = state(2);
+
+        } else {
+
+            // ==========================================
+            // MATCH FALLITO: State Augmentation (Nuovo Cono)
+            // ==========================================
+            
+            // 1. Estraiamo la covarianza corrente del veicolo (blocco 3x3)
+            Eigen::MatrixXd P = ekf_->getCovariance();
+            Eigen::Matrix3d P_vv = P.block<3, 3>(0, 0);
+            
+            // 2. Calcoliamo le distanze relative (dx, dy)
+            double dx = global_cone_x - pred_x;
+            double dy = global_cone_y - pred_y;
+            
+            // 3. Jacobiano rispetto allo stato del veicolo (G_X)
+            Eigen::Matrix<double, 2, 3> G_X;
+            G_X << 1.0, 0.0, -dy,
+                   0.0, 1.0,  dx;
+                   
+            // 4. Jacobiano rispetto alla misurazione LiDAR (G_z)
+            Eigen::Matrix2d G_z;
+            G_z << std::cos(pred_th), -std::sin(pred_th),
+                   std::sin(pred_th),  std::cos(pred_th);
+                   
+            // 5. Calcolo della covarianza iniziale del landmark
+            // NOTA: R_lidar_ deve essere la matrice 2x2 del rumore del sensore, 
+            // che idealmente dovresti rendere accessibile dal nodo o dentro la classe EKF.
+            Eigen::Matrix2d initial_landmark_cov = 
+                G_X * P_vv * G_X.transpose() + G_z * ekf_->getR() * G_z.transpose();
+                
+            // 6. Espansione dinamica del vettore di stato e della matrice P
+            ekf_->addNewLandmark(global_cone_x, global_cone_y, initial_landmark_cov);
+
             state = ekf_->getState();
             pred_x = state(0);
             pred_y = state(1);
@@ -163,28 +213,56 @@ private:
         ++imu_it;
         ++state_update_it;
     }
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    
+    // 3. Calcola la durata in microsecondi
+    auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
+    
+    // Converti in millisecondi (più leggibile per la latenza) e accumula
+    accumulated_latency_ms_ += (duration_us / 1000.0);
+    latency_counter_++;
+
+    // 4. Stampa la media ogni 100 cicli e resetta
+    if (latency_counter_ >= 100) {
+        double avg_latency = accumulated_latency_ms_ / 100.0;
+        
+        RCLCPP_INFO(this->get_logger(), 
+            "⚡ Performance [conesCallback]: Latenza media su 100 cicli = %.3f ms", 
+            avg_latency);
+            
+        // Reset per il prossimo blocco
+        latency_counter_ = 0;
+        accumulated_latency_ms_ = 0.0;
+    }
+
 }
 
-  bool findNearestMapCone(double query_x, double query_y, double threshold, double& out_x, double& out_y) {
-    double min_dist = threshold;
-    bool found = false;
+int findNearestMapCone(double global_cone_x, double global_cone_y, double threshold) {
+    Eigen::VectorXd current_state = ekf_->getState();
+    int state_size = current_state.size();
+    
+    if (state_size <= 6) return -1; 
 
-    // global_map_ rappresenta la tua lista di coni (es. std::vector<Point>) caricata in memoria
-    for (const auto& map_cone : global_map_) {
-        // Distanza euclidea tra il cono proiettato e il cono reale della mappa
-        double dist = std::hypot(map_cone.x - query_x, map_cone.y - query_y);
-        
+    int num_cones = (state_size - 6) / 2;
+    int best_id = -1;
+    double min_dist = threshold; 
+
+    for (int i = 0; i < num_cones; ++i) {
+        double map_x = current_state(6 + 2 * i);
+        double map_y = current_state(6 + 2 * i + 1);
+
+        double dist = std::hypot(global_cone_x - map_x, global_cone_y - map_y);
+
         if (dist < min_dist) {
             min_dist = dist;
-            out_x = map_cone.x;
-            out_y = map_cone.y;
-            found = true;
+            best_id = i;
         }
     }
-    return found;
+    return best_id;
 }
 
-  void mapCallback(const pacsim::msg::Track::SharedPtr msg) {
+void mapCallback(const pacsim::msg::Track::SharedPtr msg) {
     // Se abbiamo già scaricato la mappa, ignoriamo i messaggi successivi
     if (map_received_) return; 
 
@@ -213,7 +291,7 @@ private:
     RCLCPP_INFO(this->get_logger(), "Mappa globale acquisita con successo! Totale coni: %zu", global_map_.size());
 }
 
-  void publishOdometry() {
+void publishOdometry() {
     if (first_odom_) return;
     
     Eigen::VectorXd state;
@@ -226,8 +304,8 @@ private:
         P = ekf_->getCovariance();
     }
 
-    RCLCPP_INFO(this->get_logger(), "Bias stimato (rad/s): %f", state(5));
-    
+    // RCLCPP_INFO(this->get_logger(), "Bias stimato (rad/s): %f", state(5));9
+
     nav_msgs::msg::Odometry odom;
     odom.header.stamp = this->now();
     odom.header.frame_id = "map";
@@ -294,6 +372,56 @@ private:
     pub_path_->publish(path_msg_);
   }
 
+void publishMap() {
+    Eigen::VectorXd state;
+    
+    {
+        std::lock_guard<std::mutex> lock(ekf_mutex_);
+        if (first_odom_) return;
+        state = ekf_->getState();
+    }
+
+    int state_size = state.size();
+    // Se ci sono solo i 6 stati della vettura, non abbiamo ancora mappato nulla
+    if (state_size <= 6) return;
+
+    int num_cones = (state_size - 6) / 2;
+    visualization_msgs::msg::MarkerArray marker_array;
+
+    for (int i = 0; i < num_cones; ++i) {
+        visualization_msgs::msg::Marker marker;
+        marker.header.stamp = this->now();
+        marker.header.frame_id = "map";
+        marker.ns = "ekf_landmarks"; // Namespace del marker
+        marker.id = i;               // ID univoco basato sulla posizione nel vettore
+        marker.type = visualization_msgs::msg::Marker::CYLINDER;
+        marker.action = visualization_msgs::msg::Marker::ADD;
+        
+        // Estraiamo le coordinate dal vettore di stato
+        marker.pose.position.x = state(6 + 2 * i);
+        marker.pose.position.y = state(6 + 2 * i + 1);
+        marker.pose.position.z = 0.0; // Poggiano a terra
+        
+        // Orientazione neutra
+        marker.pose.orientation.w = 1.0;
+
+        // Dimensioni del cilindro (diametro 20cm, altezza 30cm)
+        marker.scale.x = 0.2;
+        marker.scale.y = 0.2;
+        marker.scale.z = 0.3;
+        
+        // Colore RGBA: Verde brillante, completamente opaco
+        marker.color.r = 0.0f;
+        marker.color.g = 1.0f;
+        marker.color.b = 0.0f;
+        marker.color.a = 1.0f;
+        
+        marker_array.markers.push_back(marker);
+    }
+    
+    pub_map_->publish(marker_array);
+}
+
   struct Point2D {
         double x;
         double y;
@@ -317,6 +445,10 @@ private:
   bool map_received_ = false; // Flag per non ricalcolare la mappa a ogni ciclo
   std::deque<StateRecord> state_buffer_;
   std::deque<ImuRecord> imu_buffer_;
+  
+  // calcolo performance
+  int latency_counter_ = 0;
+  double accumulated_latency_ms_ = 0.0;
     
   rclcpp::Subscription<pacsim::msg::Track>::SharedPtr sub_map_;
   rclcpp::Subscription<geometry_msgs::msg::TwistWithCovarianceStamped>::SharedPtr sub_vel_;
@@ -324,11 +456,15 @@ private:
   rclcpp::Subscription<pacsim::msg::PerceptionDetections>::SharedPtr sub_cones_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_pose_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_odom_;
-  // ====== gestione disegno traccia ======
+  // ====== gestione disegno traccia =======
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pub_path_;
   nav_msgs::msg::Path path_msg_;
-  // ======================================
+  // =======================================
+  // ====== gestione disegno landmark ======
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_map_;
+  // =======================================
   rclcpp::TimerBase::SharedPtr timer_viz_;
+  rclcpp::TimerBase::SharedPtr timer_map_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   std::shared_ptr<EKFPose> ekf_;
   std::mutex ekf_mutex_;

@@ -5,11 +5,12 @@ EKFPose::EKFPose() {
     x_ = Eigen::VectorXd::Zero(6);
     P_ = Eigen::MatrixXd::Identity(6, 6) * 1e-3;
     Q_ = Eigen::MatrixXd::Identity(6, 6) * 0.01;
-    R_ = Eigen::MatrixXd::Identity(1, 1) * 0.01;
+    R_ = Eigen::MatrixXd::Identity(2, 2) * 0.01;
 }   
 
-void EKFPose::setProcessNoise(double nv, double nvy, double nw) {
+void EKFPose::setProcessNoise(double nv, double nvy, double nw, double nlx, double nly) {
     Q_.diagonal() << 1e-4, 1e-4, 1e-4, nv*nv, nvy*nvy, nw*nw;
+    R_.diagonal() << nlx*nlx, nly*nly; 
 }
 
 double EKFPose::normalizeAngle(double a) {
@@ -31,7 +32,7 @@ void EKFPose::predict(double ax, double ay, double gyro_z, double dt) {
     // Invece di usare l'angolo iniziale, calcoliamo l'angolo a metà del dt
     double th_mid = th + omega * (dt / 2.0);
 
-    Eigen::VectorXd next_x(6);
+    Eigen::VectorXd next_x = x_;
     // Usiamo th_mid per proiettare le velocità, simulando una traiettoria curva
     next_x(0) = x_(0) + (vx * std::cos(th_mid) - vy * std::sin(th_mid)) * dt;
     next_x(1) = x_(1) + (vx * std::sin(th_mid) + vy * std::cos(th_mid)) * dt;
@@ -67,62 +68,137 @@ void EKFPose::predict(double ax, double ay, double gyro_z, double dt) {
     F(4, 3) = -omega * dt; 
     F(4, 5) = vx * dt;
 
-    P_ = F * P_ * F.transpose() + Q_;
+    int n = x_.size();
+
+    if (n == 6) {
+        // FASE 1: Nessun cono mappato. Il filtro si comporta come una localizzazione standard.
+        P_ = F * P_ * F.transpose() + Q_;
+    } else {
+        // FASE 2: SLAM. La mappa contiene dei coni, dobbiamo usare i blocchi.
+        int lm_dim = n - 6; // Dimensione occupata dai landmark (es. 2, 4, 6...)
+        
+        // 1. Aggiorna la covarianza del veicolo (blocco 6x6 in alto a sinistra)
+        P_.block(0, 0, 6, 6) = F * P_.block(0, 0, 6, 6) * F.transpose() + Q_;
+        
+        // 2. Aggiorna la covarianza incrociata Veicolo-Mappa (blocco 6 x lm_dim in alto a destra)
+        P_.block(0, 6, 6, lm_dim) = F * P_.block(0, 6, 6, lm_dim);
+        
+        // 3. Aggiorna la covarianza incrociata Mappa-Veicolo (blocco lm_dim x 6 in basso a sinistra)
+        // È semplicemente la trasposta del blocco calcolato al passo precedente
+        P_.block(6, 0, lm_dim, 6) = P_.block(0, 6, 6, lm_dim).transpose(); 
+        
+        // 4. Il blocco Mappa-Mappa (in basso a destra) RESTA INVARIATO
+        // Matematicamente sarebbe: P_mm = I * P_mm * I^T = P_mm
+    }
+
     x_ = next_x;
 }
 
-void EKFPose::correctPosition(double map_x, double map_y, double local_x, double local_y) {
-    double curr_x = x_(0);
-    double curr_y = x_(1);
-    double curr_th = x_(2);
-
-    // --- 1. MODELLO DI OSSERVAZIONE ---
-    // Differenza tra il cono e la vettura nel frame globale
-    double dx = map_x - curr_x;
-    double dy = map_y - curr_y;
-
-    // Dove "dovremmo" vedere il cono nel frame del LiDAR in base alla stima attuale?
-    double expected_local_x = dx * std::cos(curr_th) + dy * std::sin(curr_th);
-    double expected_local_y = -dx * std::sin(curr_th) + dy * std::cos(curr_th);
-
-    // Vettore dell'innovazione z - h(x) (Errore tra misura reale e misura attesa)
-    Eigen::VectorXd y_mat(2);
-    y_mat(0) = local_x - expected_local_x;
-    y_mat(1) = local_y - expected_local_y;
-
-    // --- 2. JACOBIANO DELL'OSSERVAZIONE (H) ---
-    // Derivate parziali di expected_local_x/y rispetto a [x, y, theta]
-    Eigen::MatrixXd H = Eigen::MatrixXd::Zero(2, 6);
+void EKFPose::correctPosition(int matched_id, double local_x_meas, double local_y_meas) {
     
-    // Rispetto a X
-    H(0, 0) = -std::cos(curr_th);
-    H(1, 0) = std::sin(curr_th);
+    int state_dim = x_.size(); // Dimensione dinamica dello stato
+
+    // 1. Estrai la posa attuale del veicolo
+    double x_v = x_(0);
+    double y_v = x_(1);
+    double theta_v = x_(2);
+
+    // 2. Estrai la posizione globale del cono mappato dal vettore di stato
+    int landmark_idx = 6 + 2 * matched_id;
+    double m_x = x_(landmark_idx);
+    double m_y = x_(landmark_idx + 1);
+
+    // 3. Calcola l'osservazione predetta (Z_hat)
+    // Ovvero: "Dove mi aspetterei di vedere questo cono rispetto alla macchina?"
+    double dx = m_x - x_v;
+    double dy = m_y - y_v;
     
-    // Rispetto a Y
-    H(0, 1) = -std::sin(curr_th);
-    H(1, 1) = -std::cos(curr_th);
+    double c_th = std::cos(theta_v);
+    double s_th = std::sin(theta_v);
+
+    Eigen::Vector2d Z_hat;
+    Z_hat(0) = dx * c_th + dy * s_th;
+    Z_hat(1) = -dx * s_th + dy * c_th;
+
+    // Vettore della misurazione reale (Z)
+    Eigen::Vector2d Z_meas(local_x_meas, local_y_meas);
     
-    // Rispetto a Theta
-    H(0, 2) = -dx * std::sin(curr_th) + dy * std::cos(curr_th);
-    H(1, 2) = -dx * std::cos(curr_th) - dy * std::sin(curr_th);
+    // Calcolo dell'Innovazione (Errore di predizione)
+    Eigen::Vector2d Y = Z_meas - Z_hat;
 
-    // --- 3. UPDATE KALMAN ---
-    Eigen::MatrixXd R_pos = Eigen::MatrixXd::Identity(2, 2) * 0.1; // Aumentato leggermente per stabilità
-    Eigen::MatrixXd S = H * P_ * H.transpose() + R_pos;
+    // ==========================================
+    // 4. COSTRUZIONE DELLO JACOBIANO DINAMICO H
+    // ==========================================
+    // Inizializziamo tutta la matrice a zero
+    Eigen::MatrixXd H = Eigen::MatrixXd::Zero(2, state_dim);
 
-    // Gating di Mahalanobis
-    if (y_mat.transpose() * S.inverse() * y_mat > 25.0) return; 
+    // A. Derivate parziali rispetto alla posa della vettura
+    H(0, 0) = -c_th;
+    H(0, 1) = -s_th;
+    H(0, 2) = -dx * s_th + dy * c_th;
 
+    H(1, 0) =  s_th;
+    H(1, 1) = -c_th;
+    H(1, 2) = -dx * c_th - dy * s_th;
+
+    // Le derivate rispetto alle velocità (v_x, v_y, omega) restano zero
+
+    // B. Derivate parziali rispetto alla posizione del cono specifico
+    H(0, landmark_idx)     =  c_th;
+    H(0, landmark_idx + 1) =  s_th;
+    
+    H(1, landmark_idx)     = -s_th;
+    H(1, landmark_idx + 1) =  c_th;
+
+    // ==========================================
+    // 5. AGGIORNAMENTO DI KALMAN
+    // ==========================================
+    // Covarianza dell'Innovazione S = H * P * H^T + R
+    Eigen::Matrix2d S = H * P_ * H.transpose() + R_;
+    
+    // Guadagno di Kalman K = P * H^T * S^-1
     Eigen::MatrixXd K = P_ * H.transpose() * S.inverse();
 
-    // Aggiornamento Stato
-    x_ = x_ + K * y_mat;
-    
-    // Normalizziamo l'angolo dopo l'update per evitare salti
+    // Aggiornamento dello Stato
+    // Questo magico calcolo correggerà simultaneamente l'auto e TUTTI i coni!
+    x_ = x_ + K * Y;
     x_(2) = normalizeAngle(x_(2));
 
-    // Joseph Form per la Covarianza
-    Eigen::MatrixXd I = Eigen::MatrixXd::Identity(6, 6);
-    Eigen::MatrixXd IKH = I - K * H;
-    P_ = IKH * P_ * IKH.transpose() + K * R_pos * K.transpose();
+    // Aggiornamento della Covarianza: P = (I - K*H) * P
+    Eigen::MatrixXd I = Eigen::MatrixXd::Identity(state_dim, state_dim);
+    P_ = (I - K * H) * P_;
+}
+
+void EKFPose::addNewLandmark(double map_cone_x, double map_cone_y, const Eigen::Matrix2d& initial_landmark_cov){
+    
+    int current_dim = x_.size();
+    int new_dim = current_dim + LANDMARK_DIM;
+
+    // ==========================================
+    // 1. ESPANSIONE DEL VETTORE DI STATO (X)
+    // ==========================================
+    // conservativeResize espande il vettore mantenendo i vecchi valori intatti
+    x_.conservativeResize(new_dim);
+    
+    // Inseriamo le coordinate globali stimate del nuovo cono in coda
+    x_(current_dim)     = map_cone_x;
+    x_(current_dim + 1) = map_cone_y;
+
+    // ==========================================
+    // 2. ESPANSIONE DELLA MATRICE DI COVARIANZA (P)
+    // ==========================================
+    P_.conservativeResize(new_dim, new_dim);
+
+    // ATTENZIONE: conservativeResize lascia memoria non inizializzata nelle nuove righe/colonne!
+    // Dobbiamo azzerare esplicitamente le nuove cross-correlazioni tra il nuovo cono
+    // e tutto il resto del sistema (veicolo + vecchi coni).
+    
+    // Azzera la nuova colonna (in alto a destra)
+    P_.block(0, current_dim, current_dim, LANDMARK_DIM).setZero();
+    
+    // Azzera la nuova riga (in basso a sinistra)
+    P_.block(current_dim, 0, LANDMARK_DIM, current_dim).setZero();
+
+    // Inserisci la covarianza iniziale del nuovo cono nel blocco 2x2 in basso a destra
+    P_.block(current_dim, current_dim, LANDMARK_DIM, LANDMARK_DIM) = initial_landmark_cov;
 }
