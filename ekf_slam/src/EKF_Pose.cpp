@@ -166,9 +166,8 @@ void EKFPose::correctPosition(int matched_id, double local_x_meas, double local_
     x_(2) = normalizeAngle(x_(2));
 
     // Aggiornamento della Covarianza: P = (I - K*H) * P
-    Eigen::MatrixXd I = Eigen::MatrixXd::Identity(state_dim, state_dim);
-    Eigen::MatrixXd I_KH = I - K * H;
-    P_ = I_KH * P_ * I_KH.transpose() + K * R_ * K.transpose();
+    // Eigen::MatrixXd I = Eigen::MatrixXd::Identity(state_dim, state_dim);
+    P_ = P_ - K * (H * P_);
     // opzionale ma utile:
 }
 
@@ -255,20 +254,41 @@ int EKFPose::dataAssociation(double local_x, double local_y, double mahalanobis_
             continue;
         }
 
-        // Costruzione dinamica di H per esplorare l'incertezza
-        Eigen::MatrixXd H = Eigen::MatrixXd::Zero(2, state_size);
-        H(0, 0) = -c_th; H(0, 1) = -s_th; H(0, 2) = -dx * s_th + dy * c_th;
-        H(1, 0) =  s_th; H(1, 1) = -c_th; H(1, 2) = -dx * c_th - dy * s_th;
-        H(0, landmark_idx) = c_th; H(0, landmark_idx + 1) = s_th;
-        H(1, landmark_idx) = -s_th; H(1, landmark_idx + 1) = c_th;
+        // // Costruzione dinamica di H per esplorare l'incertezza
+        // Eigen::MatrixXd H = Eigen::MatrixXd::Zero(2, state_size);
+        // H(0, 0) = -c_th; H(0, 1) = -s_th; H(0, 2) = -dx * s_th + dy * c_th;
+        // H(1, 0) =  s_th; H(1, 1) = -c_th; H(1, 2) = -dx * c_th - dy * s_th;
+        // H(0, landmark_idx) = c_th; H(0, landmark_idx + 1) = s_th;
+        // H(1, landmark_idx) = -s_th; H(1, landmark_idx + 1) = c_th;
 
+        // introduciamo il parcing delle matrici per alleggerire il carico computazionale
+        // 3. CALCOLO OTTIMIZZATO A BLOCCHI O(1) 
+        // Invece di allocare un'enorme matrice H piena di zeri, 
+        // estraiamo solo le derivate e le covarianze che ci interessano.
+        Eigen::Matrix<double, 2, 3> H_v;
+        H_v << -c_th, -s_th, -dx * s_th + dy * c_th,
+                s_th, -c_th, -dx * c_th - dy * s_th;
+
+        Eigen::Matrix2d H_l;
+        H_l << c_th, s_th,
+              -s_th, c_th;
+
+        Eigen::Matrix3d P_vv = P_.block(0, 0, 3, 3);
+        Eigen::Matrix2d P_ll = P_.block(landmark_idx, landmark_idx, 2, 2);
+        Eigen::Matrix<double, 3, 2> P_vl = P_.block(0, landmark_idx, 3, 2);
+        Eigen::Matrix<double, 2, 3> P_lv = P_.block(landmark_idx, 0, 2, 3);
+
+        Eigen::Matrix2d S = H_v * P_vv * H_v.transpose() +
+                            H_v * P_vl * H_l.transpose() +
+                            H_l * P_lv * H_v.transpose() +
+                            H_l * P_ll * H_l.transpose() + R_;
         // Matrice dell'Innovazione S
-        Eigen::Matrix2d S = H * P_ * H.transpose() + R_;
+        // Eigen::Matrix2d S = H * P_ * H.transpose() + R_;
         // --- AGGIUNGI QUESTO "CUSCINETTO" ---
         // Inflazione del rumore per evitare l'overconfidence (es. 10cm di incertezza minima)
-        double inflation = 0.01; // 10cm di incertezza minima
-        S(0, 0) += inflation;
-        S(1, 1) += inflation;
+        // double inflation = 0.01; // 10cm di incertezza minima
+        // S(0, 0) += inflation;
+        // S(1, 1) += inflation;
         // ------------------------------------
         // Calcolo della Distanza di Mahalanobis
         double mahalanobis_dist = Y.transpose() * S.inverse() * Y;
@@ -289,12 +309,12 @@ int EKFPose::dataAssociation(double local_x, double local_y, double mahalanobis_
         double d = std::hypot(ddx, ddy);
         if (d < min_euclid) { min_euclid = d; nearest_id = i; }
     }
-    RCLCPP_INFO(rclcpp::get_logger("ekf"), "min_mahalanobis=%.2f (thresh=%.2f) | euclid_nearest=%.3f m (id=%d)",
-                min_dist, mahalanobis_th, min_euclid, nearest_id);
+    // RCLCPP_INFO(rclcpp::get_logger("ekf"), "min_mahalanobis=%.2f (thresh=%.2f) | euclid_nearest=%.3f m (id=%d)",
+    //             min_dist, mahalanobis_th, min_euclid, nearest_id);
 
-    RCLCPP_INFO(rclcpp::get_logger("ekf"), 
-    "true_min_mahal=%.2f (thresh=%.2f) | euclid=%.3f m (id=%d) | theta=%.3f",
-    true_min_dist, mahalanobis_th, min_euclid, nearest_id, theta_v);
+    // RCLCPP_INFO(rclcpp::get_logger("ekf"), 
+    // "true_min_mahal=%.2f (thresh=%.2f) | euclid=%.3f m (id=%d) | theta=%.3f",
+    // true_min_dist, mahalanobis_th, min_euclid, nearest_id, theta_v);
     
     return best_id;
 }

@@ -9,6 +9,7 @@
 #include "pacsim/msg/perception_detections.hpp"
 #include "pacsim/msg/track.hpp"
 #include <visualization_msgs/msg/marker_array.hpp>
+#include <std_msgs/msg/float64.hpp>
 #include <chrono>
 #include <deque>
 #include <mutex>
@@ -50,6 +51,8 @@ public:
     pub_odom_ = this->create_publisher<nav_msgs::msg::Odometry>("/ekf/odometry", 10);
     pub_path_ = this->create_publisher<nav_msgs::msg::Path>("/ekf/trajectory", 10);
     pub_map_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/ekf/map_cones", 10);
+    pub_map_rmse_ = this->create_publisher<std_msgs::msg::Float64>("/ekf/map_rmse", 10);
+    pub_latency_ = this->create_publisher<std_msgs::msg::Float64>("/ekf/latency_ms", 10);
 
     timer_viz_ = rclcpp::create_timer(this, this->get_clock(), rclcpp::Duration::from_seconds(0.05), std::bind(&EKFPoseNode::publishOdometry, this));
     timer_map_ = rclcpp::create_timer(this, this->get_clock(), rclcpp::Duration::from_seconds(0.5), std::bind(&EKFPoseNode::publishMap, this));
@@ -172,6 +175,10 @@ void conesCallback(const pacsim::msg::PerceptionDetections::SharedPtr msg) {
     // 3. Calcola la durata in microsecondi
     auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
     
+    std_msgs::msg::Float64 lat_msg;
+    lat_msg.data = duration_us / 1000.0;
+    pub_latency_->publish(lat_msg);
+
     // Converti in millisecondi (più leggibile per la latenza) e accumula
     accumulated_latency_ms_ += (duration_us / 1000.0);
     latency_counter_++;
@@ -411,6 +418,10 @@ void publishMap() {
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_odom_;
   // ====== gestione disegno traccia =======
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pub_path_;
+  // ====== errore mappa =======
+  rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_map_rmse_;
+  rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_latency_;
+  // ===========================
   nav_msgs::msg::Path path_msg_;
   // =======================================
   // ====== gestione disegno landmark ======
