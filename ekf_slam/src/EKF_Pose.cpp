@@ -128,47 +128,41 @@ void EKFPose::correctPosition(int matched_id, double local_x_meas, double local_
     Eigen::Vector2d Y = Z_meas - Z_hat;
 
     // ==========================================
-    // 4. COSTRUZIONE DELLO JACOBIANO DINAMICO H
+    // 4. JACOBIANI SPAZIATI (SPARSE) - Solo i blocchi utili!
     // ==========================================
-    // Inizializziamo tutta la matrice a zero
-    Eigen::MatrixXd H = Eigen::MatrixXd::Zero(2, state_dim);
+    Eigen::Matrix<double, 2, 3> H_v;
+    H_v << -c_th, -s_th, -dx * s_th + dy * c_th,
+            s_th, -c_th, -dx * c_th - dy * s_th;
 
-    // A. Derivate parziali rispetto alla posa della vettura
-    H(0, 0) = -c_th;
-    H(0, 1) = -s_th;
-    H(0, 2) = -dx * s_th + dy * c_th;
+    Eigen::Matrix2d H_l;
+    H_l << c_th, s_th,
+          -s_th, c_th;
 
-    H(1, 0) =  s_th;
-    H(1, 1) = -c_th;
-    H(1, 2) = -dx * c_th - dy * s_th;
-
-    // Le derivate rispetto alle velocità (v_x, v_y, omega) restano zero
-
-    // B. Derivate parziali rispetto alla posizione del cono specifico
-    H(0, landmark_idx)     =  c_th;
-    H(0, landmark_idx + 1) =  s_th;
+    // ==========================================
+    // 5. AGGIORNAMENTO O(N) AD ALTISSIME PRESTAZIONI
+    // ==========================================
     
-    H(1, landmark_idx)     = -s_th;
-    H(1, landmark_idx + 1) =  c_th;
+    // 1. Calcolo di P * H^T bypassando gli zeri. 
+    // Risultato diretto in una matrice dinamica (state_dim x 2)
+    Eigen::MatrixXd PHt(state_dim, 2);
+    PHt = P_.block(0, 0, state_dim, 3) * H_v.transpose() + 
+          P_.block(0, landmark_idx, state_dim, 2) * H_l.transpose();
 
-    // ==========================================
-    // 5. AGGIORNAMENTO DI KALMAN
-    // ==========================================
-    // Covarianza dell'Innovazione S = H * P * H^T + R
-    Eigen::Matrix2d S = H * P_ * H.transpose() + R_;
-    
-    // Guadagno di Kalman K = P * H^T * S^-1
-    Eigen::MatrixXd K = P_ * H.transpose() * S.inverse();
+    // 2. Covarianza dell'Innovazione (S)
+    // Estraiamo solo le righe di PHt relative alla vettura e al landmark corrente
+    Eigen::Matrix2d S = H_v * PHt.block(0, 0, 3, 2) + 
+                        H_l * PHt.block(landmark_idx, 0, 2, 2) + R_;
 
-    // Aggiornamento dello Stato
-    // Questo magico calcolo correggerà simultaneamente l'auto e TUTTI i coni!
+    // 3. Guadagno K
+    Eigen::MatrixXd K = PHt * S.inverse();
+
+    // 4. Aggiornamento Stato
     x_ = x_ + K * Y;
     x_(2) = normalizeAngle(x_(2));
 
-    // Aggiornamento della Covarianza: P = (I - K*H) * P
-    // Eigen::MatrixXd I = Eigen::MatrixXd::Identity(state_dim, state_dim);
-    P_ = P_ - K * (H * P_);
-    // opzionale ma utile:
+    // 5. Aggiornamento P e forma di Joseph
+    P_.noalias() -= K * S * K.transpose();
+    P_ = 0.5 * (P_ + P_.transpose());
 }
 
 void EKFPose::addNewLandmark(double local_x, double local_y) {

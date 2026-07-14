@@ -31,6 +31,8 @@ public:
     this->declare_parameter("lidar_noise_y", 0.03);
     // Dichiara il parametro per il threshold
     this->declare_parameter("association_threshold", 3.9);
+    this->declare_parameter("imu_yaw_offset", 0.0);
+    this->declare_parameter("max_distance", 15.0);
 
     double nv  = this->get_parameter("process_noise_v").as_double();
     double nvy = this->get_parameter("process_noise_vy").as_double();
@@ -38,6 +40,32 @@ public:
     double nlx  = this->get_parameter("lidar_noise_x").as_double();
     double nly = this->get_parameter("lidar_noise_y").as_double();
     threshold = this->get_parameter("association_threshold").as_double();
+    imu_yaw_offset = this->get_parameter("imu_yaw_offset").as_double();
+    max_distance = this->get_parameter("max_distance").as_double();
+
+    // --- LOG DEI PARAMETRI (Sanity Check) ---
+    RCLCPP_INFO(this->get_logger(), 
+        "\n======================================================\n"
+        "🚀 NODO EKF SLAM AVVIATO - CHECK PARAMETRI ATTIVI\n"
+        "======================================================\n"
+        "[Rumore di Processo (Q)]\n"
+        "  - v (Longitudinale) : %.4f\n"
+        "  - vy (Laterale)     : %.4f\n"
+        "  - omega (Rotazione) : %.4f\n"
+        "[Rumore di Misura (R)]\n"
+        "  - LiDAR x           : %.4f\n"
+        "  - LiDAR y           : %.4f\n"
+        "[Data Association & Filtri]\n"
+        "  - Soglia Mahalanobis: %.2f\n"
+        "  - Max Lidar Range   : %.2f m\n"
+        "[Geometria & Calibrazione (Offset)]\n"
+        "  - LiDAR Yaw Offset  : %.4f rad\n"
+        "======================================================",
+        nv, nvy, nw, 
+        nlx, nly, 
+        threshold, max_distance,
+        imu_yaw_offset
+    );
 
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     ekf_->setProcessNoise(nv, nvy, nw, nlx, nly);
@@ -54,8 +82,8 @@ public:
     pub_map_rmse_ = this->create_publisher<std_msgs::msg::Float64>("/ekf/map_rmse", 10);
     pub_latency_ = this->create_publisher<std_msgs::msg::Float64>("/ekf/latency_ms", 10);
 
-    timer_viz_ = rclcpp::create_timer(this, this->get_clock(), rclcpp::Duration::from_seconds(0.05), std::bind(&EKFPoseNode::publishOdometry, this));
-    timer_map_ = rclcpp::create_timer(this, this->get_clock(), rclcpp::Duration::from_seconds(0.5), std::bind(&EKFPoseNode::publishMap, this));
+    // timer_viz_ = rclcpp::create_timer(this, this->get_clock(), rclcpp::Duration::from_seconds(0.05), std::bind(&EKFPoseNode::publishOdometry, this));
+    timer_map_ = rclcpp::create_timer(this, this->get_clock(), rclcpp::Duration::from_seconds(0.1), std::bind(&EKFPoseNode::publishMap, this));
 
     first_odom_ = true;
     RCLCPP_INFO(this->get_logger(), "EKF Node pulito e avviato.");
@@ -74,8 +102,14 @@ void imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg) {
     // 1. Salva input IMU nello storico
     ImuRecord imu_rec;
     imu_rec.stamp = now;
-    imu_rec.ax = msg->linear_acceleration.x;
-    imu_rec.ay = msg->linear_acceleration.y;
+
+    double ax_raw = msg->linear_acceleration.x;
+    double ay_raw = msg->linear_acceleration.y;
+    
+    // Rotazione per compensare il montaggio fisico
+    imu_rec.ax = ax_raw * std::cos(imu_yaw_offset) - ay_raw * std::sin(imu_yaw_offset);
+    imu_rec.ay = ax_raw * std::sin(imu_yaw_offset) + ay_raw * std::cos(imu_yaw_offset);
+    
     imu_rec.gyro_z = msg->angular_velocity.z;
     imu_rec.dt = dt;
     imu_buffer_.push_back(imu_rec);
@@ -90,13 +124,16 @@ void imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg) {
     state_rec.cov = ekf_->getCovariance();
     state_buffer_.push_back(state_rec);
 
-    // 4. Mantieni i buffer leggeri (cancelliamo i dati più vecchi di 1 secondo)
-    while(state_buffer_.size() > 0 && (now - state_buffer_.front().stamp).seconds() > 1.0) {
+    // 4. Mantieni i buffer leggeri in modo indipendente (finestra di 1 secondo)
+    while (!state_buffer_.empty() && (now - state_buffer_.front().stamp).seconds() > 1.0) {
         state_buffer_.pop_front();
+    }
+    while (!imu_buffer_.empty() && (now - imu_buffer_.front().stamp).seconds() > 1.0) {
         imu_buffer_.pop_front();
     }
 
     last_update_time_ = now;
+    publishOdometry(now);
 }
 
 void conesCallback(const pacsim::msg::PerceptionDetections::SharedPtr msg) {
@@ -106,9 +143,10 @@ void conesCallback(const pacsim::msg::PerceptionDetections::SharedPtr msg) {
     
     if (first_odom_ || state_buffer_.empty()) return; 
 
+    // Il timestamp del messaggio punta GIA' al passato corretto (es. T - 200ms)
     rclcpp::Time lidar_time(msg->header.stamp, this->get_clock()->get_clock_type());
     
-    // --- FASE 1: REWIND (Trova lo stato nel passato) ---
+    // --- FASE 1: REWIND (Cerca lo stato al tempo del lidar_time) ---
     auto best_state_it = state_buffer_.end();
     double min_time_diff = 1000.0;
     
@@ -120,23 +158,23 @@ void conesCallback(const pacsim::msg::PerceptionDetections::SharedPtr msg) {
         }
     }
 
-    // Se non troviamo uno stato coerente (es. ritardo assurdo > 0.5s), ignoriamo la misura
     if (best_state_it == state_buffer_.end() || min_time_diff > 0.5) return;
 
     // Riavvolgiamo matematicamente l'EKF a quell'istante
     ekf_->setState(best_state_it->state);
     ekf_->setCovariance(best_state_it->cov);
 
-    Eigen::VectorXd state = ekf_->getState();
-    double pred_x = state(0);
-    double pred_y = state(1);
-    double pred_th = state(2);
-
-   // --- FASE 2: CORREZIONE STORICA ---
-
+    // --- FASE 2: CORREZIONE STORICA ---
     for (const auto& perceived_cone : msg->detections) {
         double local_x = perceived_cone.pose.pose.position.x;
         double local_y = perceived_cone.pose.pose.position.y;
+
+        // --- NUOVO: FILTRO SPAZIALE (Cut-off a 15 metri) ---
+        // std::hypot calcola la distanza euclidea dall'origine del sensore
+        double distance = std::hypot(local_x, local_y);
+        if (distance > max_distance) {
+            continue; // Il cono è troppo lontano, ignoralo e passa al prossimo
+        }
 
         int matched_id = ekf_->dataAssociation(local_x, local_y, threshold);
 
@@ -147,81 +185,51 @@ void conesCallback(const pacsim::msg::PerceptionDetections::SharedPtr msg) {
         }
     }
 
-    // Salviamo il nuovo stato corretto all'interno del buffer in quella posizione temporale
     best_state_it->state = ekf_->getState();
     best_state_it->cov = ekf_->getCovariance();
 
-    // --- FASE 3: REPLAY (Propagazione in avanti) ---
-    // Ritroviamo l'indice IMU corrispondente e avanziamo di 1 (perché quell'IMU è già stata usata)
-    auto imu_it = imu_buffer_.begin() + std::distance(state_buffer_.begin(), best_state_it);
-    if (imu_it != imu_buffer_.end()) ++imu_it; 
+    // --- FASE 3: REPLAY (Propagazione in avanti Timestamp-Driven) ---
+    rclcpp::Time replay_start_time = best_state_it->stamp;
+    auto state_it = best_state_it;
 
-    auto state_update_it = best_state_it + 1;
-    
-    // Riapplichiamo iterativamente le letture IMU accumulate fino ad arrivare al presente
-    while (imu_it != imu_buffer_.end() && state_update_it != state_buffer_.end()) {
-        ekf_->predict(imu_it->ax, imu_it->ay, imu_it->gyro_z, imu_it->dt);
+    for (auto& imu_rec : imu_buffer_) {
+        // Ignoriamo le letture IMU avvenute prima o esattamente allo stato appena corretto
+        if (imu_rec.stamp <= replay_start_time) {
+            continue; 
+        }
+
+        // Reintegriamo la fisica dal passato verso il presente
+        ekf_->predict(imu_rec.ax, imu_rec.ay, imu_rec.gyro_z, imu_rec.dt);
         
-        // Aggiorniamo la storia con le nuove traiettorie modificate dalla correzione
-        state_update_it->state = ekf_->getState();
-        state_update_it->cov = ekf_->getCovariance();
-        
-        ++imu_it;
-        ++state_update_it;
+        // Sincronizzazione Lineare O(N): avanziamo l'iteratore dello stato senza ricominciare da capo
+        while (state_it != state_buffer_.end() && state_it->stamp < imu_rec.stamp) {
+            ++state_it;
+        }
+        if (state_it != state_buffer_.end() && state_it->stamp == imu_rec.stamp) {
+            state_it->state = ekf_->getState();
+            state_it->cov = ekf_->getCovariance();
+        }
     }
 
+    // --- Calcolo Performance (invariato) ---
     auto end_time = std::chrono::high_resolution_clock::now();
-    
-    // 3. Calcola la durata in microsecondi
     auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
     
     std_msgs::msg::Float64 lat_msg;
     lat_msg.data = duration_us / 1000.0;
     pub_latency_->publish(lat_msg);
 
-    // Converti in millisecondi (più leggibile per la latenza) e accumula
     accumulated_latency_ms_ += (duration_us / 1000.0);
     latency_counter_++;
 
-    // 4. Stampa la media ogni 10 cicli e resetta
     if (latency_counter_ >= 10) {
-        double avg_latency = accumulated_latency_ms_ / 100.0;
-        
-        RCLCPP_INFO(this->get_logger(), 
-            "⚡ Performance [conesCallback]: Latenza media su 100 cicli = %.3f ms", 
-            avg_latency);
-            
-        // Reset per il prossimo blocco
+        double avg_latency = accumulated_latency_ms_ / 10.0;
+        // Commentato/abilitato in base alle tue preferenze
+        // RCLCPP_INFO(this->get_logger(), "⚡ Performance: Latenza media = %.3f ms", avg_latency);
         latency_counter_ = 0;
         accumulated_latency_ms_ = 0.0;
     }
-
 }
-
-// int findNearestMapCone(double global_cone_x, double global_cone_y, double threshold) {
-//     Eigen::VectorXd current_state = ekf_->getState();
-//     int state_size = current_state.size();
-    
-//     if (state_size <= 6) return -1; 
-
-//     int num_cones = (state_size - 6) / 2;
-//     int best_id = -1;
-//     double min_dist = threshold; 
-
-//     for (int i = 0; i < num_cones; ++i) {
-//         double map_x = current_state(6 + 2 * i);
-//         double map_y = current_state(6 + 2 * i + 1);
-
-//         double dist = std::hypot(global_cone_x - map_x, global_cone_y - map_y);
-
-//         if (dist < min_dist) {
-//             min_dist = dist;
-//             best_id = i;
-//         }
-//     }
-//     return best_id;
-// }
-
 void mapCallback(const pacsim::msg::Track::SharedPtr msg) {
     // Se abbiamo già scaricato la mappa, ignoriamo i messaggi successivi
     if (map_received_) return; 
@@ -251,25 +259,21 @@ void mapCallback(const pacsim::msg::Track::SharedPtr msg) {
     RCLCPP_INFO(this->get_logger(), "Mappa globale acquisita con successo! Totale coni: %zu", global_map_.size());
 }
 
-void publishOdometry() {
+void publishOdometry(rclcpp::Time stamp) {
     if (first_odom_) return;
     
     Eigen::VectorXd state;
     Eigen::MatrixXd P;
 
-    {
-        std::lock_guard<std::mutex> lock(ekf_mutex_);
-        if (first_odom_) return;
-        state = ekf_->getState();
-        P = ekf_->getCovariance();
-    }
+    state = ekf_->getState();
+    P = ekf_->getCovariance();
 
     // RCLCPP_INFO(this->get_logger(), "Bias stimato (rad/s): %f", state(5));9
 
     nav_msgs::msg::Odometry odom;
-    odom.header.stamp = this->now();
+    odom.header.stamp = stamp;
     odom.header.frame_id = "map";
-    odom.child_frame_id = "ekf_estimate";
+    odom.child_frame_id = "cog";
 
     // Mappa stato in Pose
     odom.pose.pose.position.x = state(0);
@@ -303,9 +307,9 @@ void publishOdometry() {
 
     // --- AGGIUNGI QUESTO PER IL SDR IN MOVIMENTO ---
     geometry_msgs::msg::TransformStamped t;
-    t.header.stamp = odom.header.stamp;
+    t.header.stamp = stamp;
     t.header.frame_id = "map";
-    t.child_frame_id = "ekf_estimate"; // Il nome del tuo SDR
+    t.child_frame_id = "cog"; // Il nome del tuo SDR
 
     t.transform.translation.x = state(0);
     t.transform.translation.y = state(1);
@@ -317,7 +321,7 @@ void publishOdometry() {
     tf_broadcaster_->sendTransform(t);
 
     // Configura l'header del Path
-    path_msg_.header.stamp = this->now();
+    path_msg_.header.stamp = stamp;
     path_msg_.header.frame_id = "map";
 
     // Crea un nuovo punto (PoseStamped) estraendo i dati da Odom
@@ -327,6 +331,11 @@ void publishOdometry() {
 
     // Aggiungi il punto alla lista
     path_msg_.poses.push_back(current_pose);
+
+    // LIMITA LA LUNGHEZZA DEL PATH (es. massimo 1000 punti)
+    // if (path_msg_.poses.size() > 1000) {
+    //     path_msg_.poses.erase(path_msg_.poses.begin());
+    // }
 
     // Pubblica l'intera traiettoria
     pub_path_->publish(path_msg_);
@@ -435,6 +444,8 @@ void publishMap() {
   rclcpp::Time last_update_time_;
   bool first_odom_;
   double threshold;
+  double imu_yaw_offset;
+  double max_distance;
 };
 
 int main(int argc, char **argv) {
