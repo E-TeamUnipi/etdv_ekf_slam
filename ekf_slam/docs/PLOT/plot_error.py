@@ -78,22 +78,25 @@ def plot_analisi_completa(file_x, file_y, file_theta):
     plt.close(fig)
     print(f"✅ Analisi errori generata con successo! Apri il file: {output_filename}")
 
-def plot_analisi_latenza(file_latenza):
-    print("Inizio caricamento del file CSV della latenza...")
+def plot_analisi_latenza(file_latenza, output_filename, titolo_grafico):
+    print(f"Inizio caricamento del file CSV della latenza: {file_latenza}...")
     t_lat, latenze = carica_dati(file_latenza)
     
     if latenze is None:
         return
 
-    # Pulizia di eventuali valori non validi
+    # 1. Pulizia di eventuali valori "Not a Number"
     latenze = latenze.dropna()
+
+    # --- NUOVO: FILTRO ANTI-OUTLIER FOLLE ---
+    # Scartiamo tutti i valori superiori a 50 ms.
+    # Sappiamo che il filtro impiega < 15 ms, quindi un valore da 3000 ms 
+    # è chiaramente un freeze temporaneo del thread da parte del Sistema Operativo.
+    latenze = latenze[latenze < 50.0]
 
     # Creiamo la figura
     fig, ax1 = plt.subplots(figsize=(10, 6))
 
-    # Plot della CDF come ISTOGRAMMA
-    # cumulative=True trasforma le frequenze in probabilità cumulata
-    # bins=100 rende le barre molto più fitte e precise
     counts, bins, patches = ax1.hist(
         latenze, 
         bins=100, 
@@ -109,36 +112,53 @@ def plot_analisi_latenza(file_latenza):
     ax1.set_ylabel('Probabilità Cumulativa', color='black', fontsize=12)
     ax1.set_ylim([0, 1.05])
 
-    # --- ASSE X PIÙ FITTO ---
-    # Major tick ogni 0.5 ms (con etichetta numerica)
-    ax1.xaxis.set_major_locator(ticker.MultipleLocator(0.5))
-    # Minor tick ogni 0.1 ms (senza etichetta, solo per la griglia)
-    ax1.xaxis.set_minor_locator(ticker.MultipleLocator(0.1))
+    # --- ASSE X DINAMICO IN BASE AI DATI PULITI ---
+    max_lat = latenze.max()
+    if max_lat < 1.0:
+        ax1.xaxis.set_major_locator(ticker.MultipleLocator(0.1))
+        ax1.xaxis.set_minor_locator(ticker.MultipleLocator(0.02))
+    elif max_lat < 5.0:
+        ax1.xaxis.set_major_locator(ticker.MultipleLocator(0.5))
+        ax1.xaxis.set_minor_locator(ticker.MultipleLocator(0.1))
+    elif max_lat < 15.0:
+        ax1.xaxis.set_major_locator(ticker.MultipleLocator(1.0))
+        ax1.xaxis.set_minor_locator(ticker.MultipleLocator(0.5))
+    else:
+        ax1.xaxis.set_major_locator(ticker.MultipleLocator(5.0))
+        ax1.xaxis.set_minor_locator(ticker.MultipleLocator(1.0))
     
-    # Attiviamo la griglia sia per i major che per i minor ticks
     ax1.grid(True, which='major', linestyle='--', alpha=0.7)
     ax1.grid(True, which='minor', linestyle=':', alpha=0.4)
-    # ------------------------
 
-    # Calcolo esatto del 99° percentile tramite numpy
     p99_val = np.percentile(latenze, 99)
 
-    # Linea orizzontale e verticale di riferimento per il P99
     ax1.axhline(y=0.99, color='red', linestyle='-', linewidth=1.5, alpha=0.8)
     ax1.axvline(x=p99_val, color='red', linestyle='--', linewidth=1.5, alpha=0.8)
     
-    # Etichetta del P99 incrociato
-    ax1.text(p99_val + 0.05, 0.5, f'99% Percentile: {p99_val:.2f} ms', color='red', fontsize=11, rotation=90)
+    # Adattamento dinamico della posizione del testo in base al max_lat
+    ax1.text(p99_val + (max_lat * 0.02), 0.5, f'99% Percentile: {p99_val:.3f} ms', color='red', fontsize=11, rotation=90)
 
-    # Ottimizza layout
-    plt.title('Istogramma Cumulativo (CDF) Latenza Nodo EKF', fontsize=14, fontweight='bold', pad=10)
+    plt.title(titolo_grafico, fontsize=14, fontweight='bold', pad=10)
     fig.tight_layout()
 
-    # Salvataggio
-    output_filename = "cfd_latenza.png"
     plt.savefig(output_filename, dpi=300, bbox_inches='tight')
     plt.close(fig)
     print(f"✅ Analisi latenza generata con successo! Apri il file: {output_filename}")
+
+if __name__ == "__main__":
+    f_x = "error_x.csv"
+    f_y = "error_y.csv"
+    f_z = "error_z.csv" 
+    
+    # Assicurati di esportare due CSV distinti da Foxglove
+    f_lat_cones = "latenza_cones.csv" 
+    f_lat_imu = "latenza_imu.csv"     
+    
+    plot_analisi_completa(f_x, f_y, f_z)
+    
+    # Doppio plot!
+    plot_analisi_latenza(f_lat_cones, "cfd_latenza_cones.png", "CDF Latenza ConesCallback (LiDAR)")
+    plot_analisi_latenza(f_lat_imu, "cfd_latenza_imu.png", "CDF Latenza ImuCallback (Odometria)")
 
 if __name__ == "__main__":
     # Assicurati di avere esportato i file da Foxglove con questi nomi esatti

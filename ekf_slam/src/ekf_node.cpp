@@ -81,6 +81,7 @@ public:
     pub_map_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/ekf/map_cones", 10);
     pub_map_rmse_ = this->create_publisher<std_msgs::msg::Float64>("/ekf/map_rmse", 10);
     pub_latency_ = this->create_publisher<std_msgs::msg::Float64>("/ekf/latency_ms", 10);
+    pub_imu_latency_ = this->create_publisher<std_msgs::msg::Float64>("/ekf/imu_latency_ms", 10);
 
     // timer_viz_ = rclcpp::create_timer(this, this->get_clock(), rclcpp::Duration::from_seconds(0.05), std::bind(&EKFPoseNode::publishOdometry, this));
     timer_map_ = rclcpp::create_timer(this, this->get_clock(), rclcpp::Duration::from_seconds(0.1), std::bind(&EKFPoseNode::publishMap, this));
@@ -92,6 +93,9 @@ public:
 private:
 
 void imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg) {
+
+    auto start_time = std::chrono::high_resolution_clock::now();
+
     std::lock_guard<std::mutex> lock(ekf_mutex_);
 
     rclcpp::Time now(msg->header.stamp, this->get_clock()->get_clock_type());
@@ -134,6 +138,25 @@ void imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg) {
 
     last_update_time_ = now;
     publishOdometry(now);
+
+    // 2. Ferma il cronometro e pubblica
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
+    
+    std_msgs::msg::Float64 lat_msg;
+    lat_msg.data = duration_us / 1000.0;
+    pub_imu_latency_->publish(lat_msg);
+
+    accumulated_imu_latency_ms_ += lat_msg.data;
+    imu_latency_counter_++;
+
+    // Stampa la media ogni 100 callback (essendo l'IMU ad alta frequenza)
+    if (imu_latency_counter_ >= 100) {
+        double avg_latency = accumulated_imu_latency_ms_ / 100.0;
+        // RCLCPP_INFO(this->get_logger(), "⚡ IMU Performance: Latenza media = %.4f ms", avg_latency);
+        imu_latency_counter_ = 0;
+        accumulated_imu_latency_ms_ = 0.0;
+    }
 }
 
 void conesCallback(const pacsim::msg::PerceptionDetections::SharedPtr msg) {
@@ -309,7 +332,7 @@ void publishOdometry(rclcpp::Time stamp) {
     geometry_msgs::msg::TransformStamped t;
     t.header.stamp = stamp;
     t.header.frame_id = "map";
-    t.child_frame_id = "cog"; // Il nome del tuo SDR
+    t.child_frame_id = "ekf_cog"; // Il nome del tuo SDR
 
     t.transform.translation.x = state(0);
     t.transform.translation.y = state(1);
@@ -414,10 +437,6 @@ void publishMap() {
   bool map_received_ = false; // Flag per non ricalcolare la mappa a ogni ciclo
   std::deque<StateRecord> state_buffer_;
   std::deque<ImuRecord> imu_buffer_;
-  
-  // calcolo performance
-  int latency_counter_ = 0;
-  double accumulated_latency_ms_ = 0.0;
     
   rclcpp::Subscription<pacsim::msg::Track>::SharedPtr sub_map_;
   rclcpp::Subscription<geometry_msgs::msg::TwistWithCovarianceStamped>::SharedPtr sub_vel_;
@@ -430,6 +449,7 @@ void publishMap() {
   // ====== errore mappa =======
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_map_rmse_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_latency_;
+  rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_imu_latency_;
   // ===========================
   nav_msgs::msg::Path path_msg_;
   // =======================================
@@ -446,6 +466,12 @@ void publishMap() {
   double threshold;
   double imu_yaw_offset;
   double max_distance;
+
+  // calcolo performance
+  int latency_counter_ = 0;
+  double accumulated_latency_ms_ = 0.0;
+  int imu_latency_counter_ = 0;
+  double accumulated_imu_latency_ms_ = 0.0;
 };
 
 int main(int argc, char **argv) {
