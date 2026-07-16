@@ -9,3 +9,5 @@ A hard Euclidean boundary is applied to the perception data. Any measurement bey
 To compensate for LiDAR acquisition delays, the EKF state is historically rewound to the exact timestamp of the perception event, corrected, and then re-propagated forward using the IMU history buffer. 
 - **Result**: 
 These algorithmic improvements reduced the worst-case correction latency by ~95.5% (from an initial **129** ms down **to 5.8** ms on specific tracks).
+
+Thanks to latency reduction, overall error for pose and map estimation was reduced. Furthermore consideration on test results are specified [here](4-current-test-results.md)
