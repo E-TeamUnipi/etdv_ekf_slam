@@ -10,7 +10,8 @@ The node communicates via standard ROS 2 topics and is fully configurable throug
 
 # Published Topics
 
-The core node, `ekf_node` is focused on calculation and, by using bridge node, `tf_to_pose` debug data is displayed real-time throug specific topic
+The core node, `ekf_node` is focused on calculation and, by using bridge node, `tf_to_pose` debug data is displayed real-time through specific topic.
+
 Here's the `ekf_node` main tpics:
 - `/ekf/ekf_pose_only` (`geometry_msgs/PoseStamped`): Estimated 2D pose (X, Y, $\theta$) of the vehicle.
 - `/ekf/odometry` ([nav_msgs/msg/odometry]) Estimated pose used for tf transformation.
