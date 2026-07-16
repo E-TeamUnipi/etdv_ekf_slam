@@ -11,3 +11,5 @@ To compensate for LiDAR acquisition delays, the EKF state is historically rewoun
 These algorithmic improvements reduced the worst-case correction latency by ~95.5% (from an initial **129** ms down **to 5.8** ms on specific tracks).
 
 Thanks to latency reduction, overall error for pose and map estimation was reduced. Furthermore consideration on test results are specified [here](4-current-test-results.md)
+
+[next ->](4-current-test-results.md)

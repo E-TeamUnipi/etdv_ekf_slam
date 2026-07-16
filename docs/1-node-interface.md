@@ -39,3 +39,5 @@ Measurement noise covariance (Matrix R):
 Thresholds:
 - `association_threshold`: Mahalanobis distance limit for data association.
 - `max_distance`: Euclidean cut-off radius (in meters) for spatial filtering.
+
+[next ->](2-ekf-core-logic-architecture.md)
