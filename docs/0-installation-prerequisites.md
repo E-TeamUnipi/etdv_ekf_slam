@@ -11,5 +11,6 @@ Ensure the workspace is properly sourced before building:
 ```bash
 colcon build --packages-select etdv_ekf_slam --cmake-ars -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash
+```
 
 [next ->](1-node-interface.md)
