@@ -33,3 +33,8 @@ The table below illustrates the Root Mean Square Error evaluated against the sim
 Here's an example of graphic plot obtained after simulation depicting errors dynamics and the CDF of the latency:
 ![Errors dynamic on FSG24 layout](plot/plot_slam/SLAM_FSG24_errori.png)
 ![Latency CDF on FSG24 layout](plot/plot_slam/CDF_FSG24_latenza_imu.png)
+
+## Future Improvements
+- Code refactoring and configurable topics
+- Implementation with state machine
+- Further test for fine tuning
