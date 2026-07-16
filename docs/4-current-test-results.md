@@ -3,6 +3,7 @@ Tests were conducted using PacSim simulator on various tracks, debugging RMSE er
 Here's some of the results: 
 
 -  System Latency (99th Percentile):
+  
 The system operates well within the Real-Time safety threshold. Odometry updates remain exceptionally lightweight, while LiDAR correction peaks only on highly dense tracks.
 
 | Track Layout | Correction Latency (LiDAR) | Odometry Latency (IMU) |
@@ -16,7 +17,8 @@ The system operates well within the Real-Time safety threshold. Odometry updates
 | **Mean** | **8.507 ms** | **3.184 ms** |
 | **Std. Dev. ($\sigma$)** | **2.289 ms** | **1.475 ms** |
 
-- Estimation Accuracy (RMSE)
+- Estimation Accuracy (RMSE):
+  
 The table below illustrates the Root Mean Square Error evaluated against the simulator's Ground Truth for the 2D Pose (Euclidean distance $X-Y$), Yaw angle ($\theta$), and global Map estimation.
 
 | Track Layout | 2D Pose Error (m) | Yaw Error (rad) | Map Error (m) |
@@ -31,5 +33,11 @@ The table below illustrates the Root Mean Square Error evaluated against the sim
 | **Std. Dev. ($\sigma$)** | **0.779** | **1.017** | **0.480** |
 
 Here's an example of graphic plot obtained after simulation depicting errors dynamics and the CDF of the latency:
+
 ![Errors dynamic on FSG24 layout](plot/plot_slam/SLAM_FSG24_errori.png)
 ![Latency CDF on FSG24 layout](plot/plot_slam/CDF_FSG24_latenza_imu.png)
+
+## Future Improvements
+- Code refactoring and configurable topics
+- Implementation with state machine
+- Further test for fine tuning
