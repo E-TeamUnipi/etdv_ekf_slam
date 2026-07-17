@@ -1,22 +1,12 @@
-# Pacsim Workspace
+# etdv_ekf_slam - Season 2025/26
 
-This repo works as a sort of wrapper for the pacsim simulator.
+## Package Overview
+The `etdv_ekf_slam` package is a core component of the autonomous navigation pipeline. Its primary objective is to implement a robust Simultaneous Localization and Mapping (SLAM) algorithm based on an Extended Kalman Filter (EKF). 
 
-## How to run
-### Setup
-- be sure to have `Docker` installed
-- Clone this repo: `git clone git@github.com:E-TeamUnipi/pacsim_ws.git`
-- Enter the directory: `cd pacsim_ws`
-- Initialize submodules (pacsim): `git submodule init; git submodule update`
-### Build
-- Run `docker compose build` (can take more than 10 minutes) 
-### Execute
-- Run `docker compose up`
+Developed within the `pacsim_ws` workspace, this node is designed to process vehicle dynamics and perception data to achieve two simultaneous goals during track navigation:
+*   **Real-Time Pose Estimation:** Continuously calculate the vehicle's 2D kinematic state (position, orientation, and velocities).
+*   **Dynamic Mapping:** Accurately detect, associate, and map the positions of track cones (landmarks) in a global reference frame.
 
-### or build and execute
-- Run `docker compose up --build`
+This package serves as the foundational localization layer, ensuring that the downstream control algorithms receive the low-latency, high-accuracy state estimations strictly required for high-performance autonomous racing.
 
-
-## Foxglove visualization
-- Download/run foxglove
-- Connect to `localhost:8765`
+Check documentation [here](docs/index.md) 
