@@ -9,7 +9,7 @@ To build and run this node within the `pacsim_ws` workspace, ensure the followin
 
 Ensure the workspace is properly sourced before building:
 ```bash
-colcon build --packages-select etdv_ekf_slam --cmake-ars -DCMAKE_BUILD_TYPE=Release
+colcon build --packages-select etdv_ekf_slam --cmake-args -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash
 ```
 
