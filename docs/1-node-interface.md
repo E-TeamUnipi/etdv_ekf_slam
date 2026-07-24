@@ -7,17 +7,18 @@ The node communicates via standard ROS 2 topics and is fully configurable throug
 - `pacsim/imu/cog_imu` (`sensor_msgs/Imu`): High-frequency inertial data used for the prediction step (Dead-Reckoning).
 
 - `/pacsim/perceptiop/livox_front/landmarks` (`pacsim/msg/PerceptionDetection`): array of the local positions of the cones detected.
+- `/perception/cones` (`visualization_msgs/MarkerArray`): array of the local positions of the cones detected from perception module.
 
 # Published Topics
 
 The core node, `ekf_node` is focused on calculation and, by using bridge node, `tf_to_pose` debug data is displayed real-time through specific topic.
 
-Here's the `ekf_node` main tpics:
+Here's the `ekf_node` main topics:
 - `/ekf/ekf_pose_only` (`geometry_msgs/PoseStamped`): Estimated 2D pose (X, Y, $\theta$) of the vehicle.
-- `/ekf/odometry` ([nav_msgs/msg/odometry]) Estimated pose used for tf transformation.
-- `/ekf/map_cones` (visualization_msgs/MarkerArray): Global map of the estimated cone positions.
+- `/ekf/odometry` (`nav_msgs/msg/odometry`) Estimated pose used for tf transformation.
+- `/ekf/map_cones` (`visualization_msgs/MarkerArray`): Global map of the estimated cone positions.
 
-Here's the `tf_to_pose` main tpics:
+Here's the `tf_to_pose` main topics:
 - `/ekf/rmse` (`std_msgs/Float64`): Real-time Root Mean Square Error for pose estimation.
 - `/ekf/map_rmse` (`std_msgs/Float64`): Real-time Root Mean Square Error for map estimation.
 - `/ekf/imu_latency_ms` (`std_msgs/Float64`): Real-Time prediction latency.
@@ -27,8 +28,19 @@ Here's the `tf_to_pose` main tpics:
 
 The filter tuning is completely isolated from the source code. 
 Key parameters include:
-
+Configurable topics and run-type:
+- `use_sim_perception: true`
+- `imu_topic: "/pacsim/imu/cog_imu"`
+- `perception_topic: "/pacsim/perception/livox_front/landmarks"`
+- `perception_topic_real: "/perception/cones"`
+- `odom_topic: "/ekf/odometry"`
+- `pose_topic: "/ekf_pose_only"`
+-` map_topic: "/ekf/map_cones"`
+  
 Process noise covariance entries (Matrix Q):
+- `process_noise_x`  
+- `process_noise_y` 
+- `process_noise_yaw`
 - `process_noise_v`  
 - `process_noise_vy` 
 - `process_noise_omega` 
