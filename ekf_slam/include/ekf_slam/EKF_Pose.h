@@ -6,7 +6,7 @@
 class EKFPose {
 public:
     EKFPose();
-    void setProcessNoise(double noise_ax, double noise_ay, double noise_omega, double noise_lx, double noise_ly);
+    void setProcessNoise(double noise_x, double noise_y, double noise_yaw, double noise_ax, double noise_ay, double noise_omega, double noise_lx, double noise_ly);
     void setState(const Eigen::VectorXd& state) { x_ = state; }
     void setCovariance(const Eigen::MatrixXd& cov) { P_ = cov; }
     void predict(double ax, double ay, double gyro_z, double dt);

@@ -1,23 +1,29 @@
 /ekf_node:
   ros__parameters:
-    max_dt: 1.0
-    
+    # --- Modalità Esecuzione ---
+    use_sim_perception: true    # Se TRUE usa pacsim::msg, se FALSE usa MarkerArray (Real/Rosbag)
+
+    # --- Configurazione Topic (Attuali PacSim) ---
+    imu_topic: "/pacsim/imu/cog_imu"
+    perception_topic: "/pacsim/perception/livox_front/landmarks"
+    perception_topic_real: "/perception/cones"
+    odom_topic: "/ekf/odometry"
+    pose_topic: "/ekf_pose_only"
+    map_topic: "/ekf/map_cones"
+
     # --- Tuning "Aggressivo" (Forza la correzione) ---
-    
-    # AUMENTA questi valori. Di al robot che le ruote scivolano!
-    # Questo aumenta la Matrice P (Incertezza posizione)
+    process_noise_x: 0.001
+    process_noise_y: 0.001      
+    process_noise_yaw: 0.01
     process_noise_v: 0.1
-    process_noise_vy: 0.2      # Prova 2.5 o 3.0 (era 0.8) -> 0.5 per la simulazione
-    process_noise_omega: 0.1   # Prova 2.5 o 3.0 (era 0.5) -> come sopra
+    process_noise_vy: 0.2
+    process_noise_omega: 0.3
     
-    # RILASSA leggermente questi valori
-    # Se sono troppo piccoli, rischi di scartare dati validi
-    lidar_noise_x: 0.05     # 10 cm è più realistico di 5 cm
-    lidar_noise_y: 0.05   # Va bene
+    lidar_noise_x: 0.05
+    lidar_noise_y: 0.05
     
-    # IMPORTANTE: Data Association
-    association_threshold: 9.21 # 50.0 è ENORME! -> 5 per la simulazion
+    association_threshold: 9.21
     max_distance: 15.0
 
     # Calibrazione
-    imu_yaw_offset: 0.0 # 0.8 gradi
+    imu_yaw_offset: 0.0
